@@ -1,0 +1,137 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg-primary: #36393f;
+  --bg-secondary: #2f3136;
+  --bg-tertiary: #202225;
+  --bg-accent: #40444b;
+  --text-normal: #dcddde;
+  --text-muted: #72767d;
+  --text-header: #ffffff;
+  --interactive-normal: #b9bbbe;
+  --interactive-hover: #dcddde;
+  --interactive-active: #ffffff;
+  --brand: #5865F2;
+  --brand-hover: #4752c4;
+  --danger: #ed4245;
+  --success: #3ba55c;
+  --font-primary: 'Inter', sans-serif;
+  --bg-footer: #232428;
+  --bg-overlay: rgba(0, 0, 0, 0.85);
+}
+
+[data-theme='light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f2f3f5;
+  --bg-tertiary: #e3e5e8;
+  --bg-accent: #ebedef;
+  --text-normal: #2e3338;
+  --text-muted: #4f5660;
+  --text-header: #060607;
+  --interactive-normal: #4f5660;
+  --interactive-hover: #2e3338;
+  --bg-footer: #ebedef;
+  --interactive-active: #060607;
+  --bg-overlay: rgba(255, 255, 255, 0.95);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-primary);
+  background-color: var(--bg-primary);
+  color: var(--text-normal);
+  line-height: 1.5;
+  user-select: none;
+  /* Discord-like feel */
+  overflow: hidden;
+  /* App-like feel */
+}
+
+input,
+button {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background-color: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 72px;
+  background-color: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+}
+
+.main-content {
+  flex: 1;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.room-sidebar {
+  width: 240px;
+  background-color: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Speaking Animation */
+@keyframes ripple {
+  0% {
+    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 10px rgba(88, 101, 242, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0);
+  }
+}
+
+.speaking {
+  animation: ripple 2s infinite;
+  border: 2px solid var(--brand) !important;
+}
+
+.voice-wave {
+  height: 4px;
+  background: var(--brand);
+  position: absolute;
+  bottom: 0px;
+  left: 0;
+  right: 0;
+  transition: transform 0.1s ease;
+  transform-origin: bottom;
+}
