@@ -62,6 +62,26 @@
     outline: 1px solid var(--brand);
 }
 
+.password-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-toggle-icon {
+    position: absolute;
+    right: 10px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: color 0.2s;
+    display: flex;
+    align-items: center;
+}
+
+.password-toggle-icon:hover {
+    color: var(--text-normal);
+}
+
 .auth-button {
     background-color: var(--brand);
     color: white;

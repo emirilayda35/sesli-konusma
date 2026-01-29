@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { auth, db, storage } from '../firebase';
+import { useUI } from '../contexts/UIContext';
+import { storage } from '../firebase';
 import {
     collection,
     onSnapshot,
@@ -16,31 +17,96 @@ import {
     arrayUnion
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { FaMicrophone, FaHeadphones, FaCog, FaVolumeUp, FaPlus, FaCheck, FaTimes, FaUserPlus, FaSearch, FaSignOutAlt } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaHeadphones, FaVolumeMute, FaCog, FaVolumeUp, FaPlus, FaCheck, FaTimes, FaUserPlus, FaSearch, FaSignOutAlt, FaUserFriends, FaUserCircle } from 'react-icons/fa';
 import '../styles/layout.css';
+import { useClickOutside } from '../hooks/useClickOutside';
+import UserContextMenu from './UserContextMenu';
 
-export const ServerSidebar = () => (
-    <aside className="server-sidebar">
-        <div className="server-icon active">VC</div>
-        <div style={{ width: 32, height: 2, background: 'var(--bg-accent)', margin: '4px 0' }} />
-        <div className="server-icon"><FaPlus /></div>
-    </aside>
-);
+export const ServerSidebar = () => {
+    const { showAlert } = useUI();
+    return (
+        <aside className="server-sidebar">
+            <div className="server-icon active" title="Giriş">VC</div>
+            <div style={{ width: 32, height: 2, background: 'var(--bg-accent)', margin: '4px 0' }} />
+            <div
+                className="server-icon"
+                onClick={() => showAlert('Sunucu', 'Sunucu ekleme özelliği çok yakında! Şimdilik mevcut sunucuyu kullanabilirsiniz.')}
+                style={{ cursor: 'pointer' }}
+                title="Sunucu Ekle"
+            >
+                <FaPlus />
+            </div>
+        </aside>
+    );
+};
 
 import SettingsModal from './SettingsModal';
+import CreateGroupModal from './CreateGroupModal';
+import AddAccountModal from './AddAccountModal';
 
-export const RoomSidebar = ({ activeRoom, onRoomSelect }: { activeRoom: string | null, onRoomSelect: (id: string) => void }) => {
+export const RoomSidebar = ({
+    activeRoom,
+    onRoomSelect,
+    activeGroup,
+    onGroupSelect
+}: {
+    activeRoom: string | null,
+    onRoomSelect: (id: string | null) => void,
+    activeGroup: string | null,
+    onGroupSelect: (id: string | null) => void
+}) => {
     const { currentUser, userData } = useAuth();
     const [rooms, setRooms] = useState<{ id: string, name: string }[]>([]);
+    const [groups, setGroups] = useState<{ id: string, name: string }[]>([]);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+    const [isMicMuted, setIsMicMuted] = useState(false);
+    const [isDeafened, setIsDeafened] = useState(false);
+    const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+    const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
+    const accountMenuRef = useRef<HTMLDivElement>(null);
+
+    useClickOutside(accountMenuRef, () => {
+        if (isAccountMenuOpen) setIsAccountMenuOpen(false);
+    });
+
+    const { savedAccounts, switchAccount, addAccount, logoutCurrent, db } = useAuth();
+
+    const toggleMic = () => {
+        const next = !isMicMuted;
+        setIsMicMuted(next);
+        window.dispatchEvent(new CustomEvent('global_audio_state', { detail: { type: 'mic', value: next } }));
+    };
+
+    const toggleDeafen = () => {
+        const next = !isDeafened;
+        setIsDeafened(next);
+        // Deafening also mutes the mic usually in such apps
+        if (next && !isMicMuted) {
+            setIsMicMuted(true);
+            window.dispatchEvent(new CustomEvent('global_audio_state', { detail: { type: 'mic', value: true } }));
+        }
+        window.dispatchEvent(new CustomEvent('global_audio_state', { detail: { type: 'deafen', value: next } }));
+    };
 
     useEffect(() => {
-        const unsub = onSnapshot(collection(db, 'rooms'), (snapshot) => {
+        const unsubRooms = onSnapshot(collection(db, 'rooms'), (snapshot) => {
             const roomList = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
             setRooms(roomList);
         });
-        return unsub;
-    }, []);
+
+        if (!currentUser) return;
+        const qGroups = query(collection(db, 'groups'), where('members', 'array-contains', currentUser.uid));
+        const unsubGroups = onSnapshot(qGroups, (snapshot) => {
+            const groupList = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+            setGroups(groupList);
+        });
+
+        return () => {
+            unsubRooms();
+            unsubGroups();
+        };
+    }, [currentUser]);
 
     const createRoom = async () => {
         const name = prompt('Oda ismi girin:');
@@ -49,24 +115,11 @@ export const RoomSidebar = ({ activeRoom, onRoomSelect }: { activeRoom: string |
         }
     };
 
+    const [initialTab, setInitialTab] = useState('account');
+
     const handleAvatarClick = () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = async (e: any) => {
-            const file = e.target.files[0];
-            if (!file || !currentUser) return;
-
-            const storageRef = ref(storage, `avatars/${currentUser.uid}`);
-            await uploadBytes(storageRef, file);
-            const url = await getDownloadURL(storageRef);
-
-            // Update Firestore
-            await updateDoc(doc(db, 'users', currentUser.uid), {
-                photoURL: url
-            });
-        };
-        input.click();
+        setInitialTab('account');
+        setIsSettingsOpen(true);
     };
 
     return (
@@ -82,9 +135,28 @@ export const RoomSidebar = ({ activeRoom, onRoomSelect }: { activeRoom: string |
                     <div
                         key={room.id}
                         className={`room-item ${activeRoom === room.id ? 'active' : ''}`}
-                        onClick={() => onRoomSelect(room.id)}
+                        onClick={() => {
+                            onRoomSelect(room.id);
+                            onGroupSelect(null);
+                        }}
                     >
                         <FaVolumeUp /> {room.name}
+                    </div>
+                ))}
+
+                <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
+                    MESAJ GRUPLARI <span onClick={() => setIsCreateGroupOpen(true)} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
+                </div>
+                {groups.map(group => (
+                    <div
+                        key={group.id}
+                        className={`room-item ${activeGroup === group.id ? 'active' : ''}`}
+                        onClick={() => {
+                            onGroupSelect(group.id);
+                            onRoomSelect(null);
+                        }}
+                    >
+                        <FaPlus size={12} style={{ color: 'var(--text-muted)', marginRight: '4px' }} /> {group.name}
                     </div>
                 ))}
             </div>
@@ -105,14 +177,82 @@ export const RoomSidebar = ({ activeRoom, onRoomSelect }: { activeRoom: string |
                     <div className="user-status">Çevrimiçi</div>
                 </div>
                 <div className="user-controls">
-                    <button className="control-btn" title="Mikrofon"><FaMicrophone /></button>
-                    <button className="control-btn" title="Sağırlaştır"><FaHeadphones /></button>
-                    <button className="control-btn" title="Ayarlar" onClick={() => setIsSettingsOpen(true)}><FaCog /></button>
-                    <button className="control-btn" title="Çıkış Yap" onClick={() => auth.signOut()} style={{ color: 'var(--danger)' }}><FaSignOutAlt /></button>
+                    <div style={{ position: 'relative' }} ref={accountMenuRef}>
+                        <button
+                            className="control-btn"
+                            title="Hesap Değiştir"
+                            onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
+                        >
+                            <FaUserFriends />
+                        </button>
+
+                        {isAccountMenuOpen && (
+                            <div className="account-switcher-popover">
+                                <div className="popover-header">HESAPLAR</div>
+                                <div className="popover-list">
+                                    {savedAccounts.map(acc => (
+                                        <div
+                                            key={acc.uid}
+                                            className={`account-item ${acc.uid === currentUser?.uid ? 'active' : ''}`}
+                                            onClick={() => {
+                                                if (acc.uid !== currentUser?.uid) switchAccount(acc.uid);
+                                                setIsAccountMenuOpen(false);
+                                            }}
+                                        >
+                                            {acc.photoURL ? (
+                                                <img src={acc.photoURL} alt="" />
+                                            ) : (
+                                                <div className="avatar">{acc.displayName?.charAt(0) || '?'}</div>
+                                            )}
+                                            <div className="acc-meta">
+                                                <div className="acc-name">{acc.displayName || 'İsimsiz'}</div>
+                                                <div className="acc-status">{acc.uid === currentUser?.uid ? 'Şu anki' : 'Geçiş yap'}</div>
+                                            </div>
+                                            {acc.uid === currentUser?.uid && <FaCheck className="active-check" />}
+                                        </div>
+                                    ))}
+                                    <div
+                                        className="account-item add-account"
+                                        onClick={() => {
+                                            setIsAccountMenuOpen(false);
+                                            setIsAddAccountOpen(true);
+                                        }}
+                                    >
+                                        <div className="avatar add"><FaPlus /></div>
+                                        <span>Yeni Hesap Ekle</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <button
+                        className={`control-btn ${isMicMuted ? 'muted' : ''}`}
+                        title={isMicMuted ? "Sesi Aç" : "Sesi Kapat"}
+                        onClick={toggleMic}
+                        style={{ color: isMicMuted ? 'var(--danger)' : 'var(--text-normal)' }}
+                    >
+                        {isMicMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+                    </button>
+                    <button
+                        className={`control-btn ${isDeafened ? 'deafened' : ''}`}
+                        title={isDeafened ? "Sağırlaştırmayı Kapat" : "Sağırlaştır"}
+                        onClick={toggleDeafen}
+                        style={{ color: isDeafened ? 'var(--danger)' : 'var(--text-normal)' }}
+                    >
+                        {isDeafened ? <FaVolumeMute /> : <FaHeadphones />}
+                    </button>
+                    <button className="control-btn" title="Ayarlar" onClick={() => { setInitialTab('voice'); setIsSettingsOpen(true); }}><FaCog /></button>
+                    <button className="control-btn" title="Çıkış Yap" onClick={logoutCurrent} style={{ color: 'var(--danger)' }}><FaSignOutAlt /></button>
                 </div>
             </footer>
 
-            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+            <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} initialTab={initialTab} />
+            <CreateGroupModal isOpen={isCreateGroupOpen} onClose={() => setIsCreateGroupOpen(false)} />
+            <AddAccountModal
+                isOpen={isAddAccountOpen}
+                onClose={() => setIsAddAccountOpen(false)}
+                onSuccess={(user) => addAccount(user)}
+            />
         </aside>
     );
 };
@@ -120,35 +260,55 @@ export const RoomSidebar = ({ activeRoom, onRoomSelect }: { activeRoom: string |
 
 
 export const UserPanel = () => {
-    const { currentUser, userData } = useAuth();
-    const [searchEmail, setSearchEmail] = useState('');
+    const { currentUser, userData, db } = useAuth();
     const [friendRequests, setFriendRequests] = useState<any[]>([]);
     const [friends, setFriends] = useState<any[]>([]);
+    const [contextMenu, setContextMenu] = useState<{ user: any; position: { x: number; y: number } } | null>(null);
 
     useEffect(() => {
         if (!currentUser) return;
 
         // Listen for friend requests
         const q = query(collection(db, 'friendRequests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
-        const unsubRequests = onSnapshot(q, async (snapshot) => {
-            const requests = await Promise.all(snapshot.docs.map(async (docSnap) => {
-                const data = docSnap.data();
-                const fromSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', data.from)));
-                const fromData = fromSnap.docs[0]?.data();
-                return { id: docSnap.id, ...data, fromName: fromData?.displayName || 'Bilinmeyen' };
-            }));
+        let unsubNames: (() => void)[] = [];
+
+        const unsubRequests = onSnapshot(q, (snapshot) => {
+            // Clean up previous name listeners
+            unsubNames.forEach(u => u());
+            unsubNames = [];
+
+            const requests = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
             setFriendRequests(requests);
+
+            // Fetch/Listen to names for each request sender
+            requests.forEach(req => {
+                const u = onSnapshot(doc(db, 'users', (req as any).from), (userSnap) => {
+                    if (userSnap.exists()) {
+                        setFriendRequests(prev => prev.map(r =>
+                            r.from === (req as any).from
+                                ? { ...r, fromName: userSnap.data().displayName || 'Bilinmeyen' }
+                                : r
+                        ));
+                    }
+                });
+                unsubNames.push(u);
+            });
         });
 
-        const unsubFriends = onSnapshot(doc(db, 'users', currentUser.uid), async (docSnap) => {
+        let unsubFriendsProfiles: (() => void) | null = null;
+        const unsubFriends = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
+            if (unsubFriendsProfiles) unsubFriendsProfiles();
+
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                if (data?.friends?.length > 0) {
-                    const fDocs = await Promise.all(data.friends.map(async (fUid: string) => {
-                        const fSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', fUid)));
-                        return fSnap.docs[0]?.data();
-                    }));
-                    setFriends(fDocs.filter(f => f));
+                const friendUids = data?.friends || [];
+
+                if (friendUids.length > 0) {
+                    const qFriends = query(collection(db, 'users'), where('uid', 'in', friendUids.slice(0, 30)));
+                    unsubFriendsProfiles = onSnapshot(qFriends, (snap) => {
+                        const fDocs = snap.docs.map(d => d.data());
+                        setFriends(fDocs);
+                    });
                 } else {
                     setFriends([]);
                 }
@@ -158,28 +318,45 @@ export const UserPanel = () => {
         return () => {
             unsubRequests();
             unsubFriends();
+            if (unsubFriendsProfiles) unsubFriendsProfiles();
         };
     }, [currentUser]);
 
+    const [searchQuery, setSearchQuery] = useState('');
+    const { showAlert } = useUI();
+
     const sendFriendRequest = async () => {
-        if (!searchEmail || !currentUser) return;
+        if (!searchQuery || !currentUser) return;
 
         try {
-            const userQuery = query(collection(db, 'users'), where('email', '==', searchEmail));
-            const userSnap = await getDocs(userQuery);
+            // Firestore doesn't support 'OR' queries well across different fields without special indexes,
+            // so we'll check email first, then displayName if not found.
+            let userQuery = query(collection(db, 'users'), where('email', '==', searchQuery));
+            let userSnap = await getDocs(userQuery);
 
             if (userSnap.empty) {
-                alert('Kullanıcı bulunamadı!');
+                userQuery = query(collection(db, 'users'), where('displayName', '==', searchQuery));
+                userSnap = await getDocs(userQuery);
+            }
+
+            if (userSnap.empty) {
+                showAlert('Hata', 'Kullanıcı bulunamadı! (E-posta veya kullanıcı adını kontrol edin)');
                 return;
             }
 
             const targetUser = userSnap.docs[0].data();
             if (targetUser.uid === currentUser.uid) {
-                alert('Kendinizi ekleyemezsiniz!');
+                showAlert('Hata', 'Kendinizi ekleyemezsiniz!');
                 return;
             }
 
-            // Check if already friends or request exists
+            // Check if already friends
+            const currentUsersFriends = userData?.friends || [];
+            if (currentUsersFriends.includes(targetUser.uid)) {
+                showAlert('Bilgi', 'Bu kullanıcı zaten arkadaşınız!');
+                return;
+            }
+
             await addDoc(collection(db, 'friendRequests'), {
                 from: currentUser.uid,
                 to: targetUser.uid,
@@ -187,8 +364,8 @@ export const UserPanel = () => {
                 createdAt: serverTimestamp()
             });
 
-            alert('İstek gönderildi!');
-            setSearchEmail('');
+            showAlert('Başarılı', 'İstek gönderildi!');
+            setSearchQuery('');
         } catch (err) {
             console.error(err);
         }
@@ -210,14 +387,127 @@ export const UserPanel = () => {
         }
     };
 
+    const handleUserClick = (friend: any, event: React.MouseEvent) => {
+        event.preventDefault();
+        const rect = (event.target as HTMLElement).getBoundingClientRect();
+        setContextMenu({
+            user: friend,
+            position: { x: rect.right + 10, y: rect.top }
+        });
+    };
+
+    const handleSendMessage = async (userId: string) => {
+        // Create or find existing DM group
+        const groupsRef = collection(db, 'groups');
+        const q = query(groupsRef, where('members', 'array-contains', currentUser?.uid));
+        const snapshot = await getDocs(q);
+
+        let existingGroup = null;
+        snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.members.length === 2 && data.members.includes(userId)) {
+                existingGroup = { id: docSnap.id, ...data };
+            }
+        });
+
+        if (existingGroup) {
+            showAlert('Mesaj', 'Mevcut sohbete yönlendiriliyorsunuz...');
+        } else {
+            const targetUser = friends.find(f => f.uid === userId);
+            await addDoc(groupsRef, {
+                name: `${userData?.displayName} & ${targetUser?.displayName}`,
+                members: [currentUser?.uid, userId],
+                createdAt: serverTimestamp()
+            });
+            showAlert('Mesaj', 'Yeni sohbet oluşturuldu!');
+        }
+    };
+
+    const handleVoiceCall = async (userId: string) => {
+        try {
+            const targetUser = friends.find(f => f.uid === userId);
+            const roomName = `${userData?.displayName} & ${targetUser?.displayName}`;
+
+            // Create a new voice room
+            const roomRef = await addDoc(collection(db, 'rooms'), {
+                name: roomName,
+                type: 'voice',
+                participants: [currentUser?.uid, userId],
+                createdBy: currentUser?.uid,
+                createdAt: serverTimestamp()
+            });
+
+            showAlert('Sesli Arama', `${targetUser?.displayName} ile sesli arama başlatıldı!`);
+
+            // Trigger room selection via custom event
+            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
+        } catch (error) {
+            console.error('Voice call error:', error);
+            showAlert('Hata', 'Sesli arama başlatılamadı.');
+        }
+    };
+
+    const handleVideoCall = async (userId: string) => {
+        try {
+            const targetUser = friends.find(f => f.uid === userId);
+            const roomName = `${userData?.displayName} & ${targetUser?.displayName}`;
+
+            // Create a new video room
+            const roomRef = await addDoc(collection(db, 'rooms'), {
+                name: roomName,
+                type: 'video',
+                participants: [currentUser?.uid, userId],
+                createdBy: currentUser?.uid,
+                createdAt: serverTimestamp()
+            });
+
+            showAlert('Görüntülü Arama', `${targetUser?.displayName} ile görüntülü arama başlatıldı!`);
+
+            // Trigger room selection via custom event
+            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
+        } catch (error) {
+            console.error('Video call error:', error);
+            showAlert('Hata', 'Görüntülü arama başlatılamadı.');
+        }
+    };
+
+    const handleBlockUser = async (userId: string) => {
+        const { showConfirm } = useUI();
+        showConfirm(
+            'Kullanıcıyı Engelle',
+            'Bu kullanıcıyı engellemek istediğinizden emin misiniz? Artık sizinle iletişime geçemeyecek.',
+            async () => {
+                showAlert('Engellendi', 'Kullanıcı başarıyla engellendi.');
+            },
+            'Engelle',
+            true
+        );
+    };
+
+    const formatLastActive = (timestamp: any) => {
+        if (!timestamp) return 'Bilinmiyor';
+        try {
+            const date = timestamp.seconds ? new Date(timestamp.seconds * 1000) : new Date(timestamp);
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+            if (diff < 60) return 'Şu an aktif';
+            if (diff < 3600) return `${Math.floor(diff / 60)} dk önce`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)} sa önce`;
+            return date.toLocaleDateString('tr-TR');
+        } catch (e) {
+            return 'Bilinmiyor';
+        }
+    };
+
     return (
         <aside className="user-panel">
             <div className="friend-search">
                 <input
                     type="text"
-                    placeholder="E-posta ile ara..."
-                    value={searchEmail}
-                    onChange={(e) => setSearchEmail(e.target.value)}
+                    placeholder="E-posta veya kullanıcı adı..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                 />
                 <button onClick={sendFriendRequest}><FaUserPlus /></button>
             </div>
@@ -240,18 +530,43 @@ export const UserPanel = () => {
             <div className="section">
                 <div className="member-header">ARKADAŞLAR — {friends.length}</div>
                 {friends.map(friend => (
-                    <div key={friend.uid} className="member-item">
+                    <div
+                        key={friend.uid}
+                        className="member-item"
+                        style={{ gap: '12px', cursor: 'pointer' }}
+                        onClick={(e) => handleUserClick(friend, e)}
+                    >
                         <div className="avatar-wrapper">
                             {friend.photoURL ? (
                                 <img src={friend.photoURL} alt="" className="avatar" style={{ width: 32, height: 32, borderRadius: '50%' }} />
                             ) : (
-                                <div className="avatar">{friend.displayName.charAt(0)}</div>
+                                <div className="avatar" style={{ width: 32, height: 32 }}>{friend.displayName?.charAt(0) || '?'}</div>
                             )}
                         </div>
-                        <div className="user-display-name">{friend.displayName}</div>
+                        <div className="user-info" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div className={`status-dot ${friend.isOnline ? 'online' : 'offline'}`} />
+                                <span className="user-display-name" style={{ fontSize: '14px' }}>{friend.displayName}</span>
+                            </div>
+                            <span className="last-seen">
+                                {friend.isOnline ? 'Çevrimiçi' : formatLastActive(friend.lastActive)}
+                            </span>
+                        </div>
                     </div>
                 ))}
             </div>
+
+            {contextMenu && (
+                <UserContextMenu
+                    user={contextMenu.user}
+                    position={contextMenu.position}
+                    onClose={() => setContextMenu(null)}
+                    onSendMessage={handleSendMessage}
+                    onVoiceCall={handleVoiceCall}
+                    onVideoCall={handleVideoCall}
+                    onBlockUser={handleBlockUser}
+                />
+            )}
         </aside>
     );
 };

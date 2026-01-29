@@ -106,23 +106,25 @@ button {
 }
 
 /* Speaking Animation */
-@keyframes ripple {
+/* Speaking Animation - Discord Style */
+@keyframes speaking-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0.4);
+    box-shadow: 0 0 0 0 rgba(59, 165, 92, 0.7);
   }
 
   70% {
-    box-shadow: 0 0 0 10px rgba(88, 101, 242, 0);
+    box-shadow: 0 0 0 6px rgba(59, 165, 92, 0);
   }
 
   100% {
-    box-shadow: 0 0 0 0 rgba(88, 101, 242, 0);
+    box-shadow: 0 0 0 0 rgba(59, 165, 92, 0);
   }
 }
 
 .speaking {
-  animation: ripple 2s infinite;
-  border: 2px solid var(--brand) !important;
+  animation: speaking-pulse 1.5s infinite;
+  border-color: var(--success) !important;
+  transition: border-color 0.2s ease;
 }
 
 .voice-wave {

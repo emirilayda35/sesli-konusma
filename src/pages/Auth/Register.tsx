@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { auth } from '../../firebase';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import { createUserWithEmailAndPassword, updateProfile, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { useAuth } from '../../contexts/AuthContext';
+import { auth, firebaseConfig } from '../../firebase';
 import '../../styles/auth.css';
 
 export default function Register() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [username, setUsername] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const { switchAccount } = useAuth();
     const navigate = useNavigate();
 
     async function handleSubmit(e: React.FormEvent) {
@@ -21,10 +26,28 @@ export default function Register() {
         try {
             setError('');
             setLoading(true);
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            await updateProfile(userCredential.user, {
+
+            // 1. Initial register on helper app to get UID
+            const helperAppName = 'auth-helper';
+            const helperApp = getApps().find(a => a.name === helperAppName) || initializeApp(firebaseConfig, helperAppName);
+            const helperAuth = getAuth(helperApp);
+
+            const userCredential = await createUserWithEmailAndPassword(helperAuth, email, password);
+            const user = userCredential.user;
+            await updateProfile(user, {
                 displayName: username
             });
+            const uid = user.uid;
+
+            // 2. Persistent login on named app
+            const name = `app-${uid}`;
+            const permanentApp = getApps().find(a => a.name === name) || initializeApp(firebaseConfig, name);
+            const permanentAuth = getAuth(permanentApp);
+            await signInWithEmailAndPassword(permanentAuth, email, password);
+
+            // 3. Switch account in context
+            await switchAccount(uid);
+
             navigate('/');
         } catch (err: any) {
             if (err.code === 'auth/email-already-in-use') {
@@ -66,12 +89,21 @@ export default function Register() {
                     </div>
                     <div className="form-group">
                         <label>ŞİFRE</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                        />
+                        <div className="password-input-wrapper">
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                                style={{ width: '100%', paddingRight: '40px' }}
+                            />
+                            <div
+                                className="password-toggle-icon"
+                                onClick={() => setShowPassword(!showPassword)}
+                            >
+                                {showPassword ? <FaEyeSlash /> : <FaEye />}
+                            </div>
+                        </div>
                     </div>
                     <button disabled={loading} className="auth-button" type="submit">
                         {loading ? 'Hesap oluşturuluyor...' : 'Devam Et'}

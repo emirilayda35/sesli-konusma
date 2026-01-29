@@ -1,18 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import { FaTimes } from 'react-icons/fa';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FaTimes, FaCamera } from 'react-icons/fa';
+import Cropper from 'react-easy-crop';
 import { useAuth } from '../contexts/AuthContext';
-import { auth } from '../firebase';
+import { useUI } from '../contexts/UIContext';
+import { doc, updateDoc } from 'firebase/firestore';
+import { getCroppedImg } from '../utils/imageUtils';
 import '../styles/settings.css';
 
 interface SettingsModalProps {
     isOpen: boolean;
     onClose: () => void;
+    initialTab?: string;
 }
 
-export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-    const { currentUser, userData } = useAuth();
-    const [activeTab, setActiveTab] = useState('voice');
+export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }: SettingsModalProps) {
+    const { currentUser, userData, logoutCurrent, db } = useAuth();
+    const { showAlert } = useUI();
+    const [activeTab, setActiveTab] = useState(initialTab);
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+    const [uploading, setUploading] = useState(false);
+    const [uploadStatus, setUploadStatus] = useState<string>('');
+
+    // Username change states
+    const [newDisplayName, setNewDisplayName] = useState(userData?.displayName || '');
+    const [isSavingName, setIsSavingName] = useState(false);
+
+    // Update active tab and name when modal is opened
+    useEffect(() => {
+        if (isOpen) {
+            setActiveTab(initialTab);
+            setNewDisplayName(userData?.displayName || '');
+        }
+    }, [isOpen, initialTab, userData?.displayName]);
+
+    // Cropping States
+    const [image, setImage] = useState<string | null>(null);
+    const [crop, setCrop] = useState({ x: 0, y: 0 });
+    const [zoom, setZoom] = useState(1);
+    const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
+
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [settings, setSettings] = useState({
         inputId: localStorage.getItem('voice_inputId') || 'default',
         outputId: localStorage.getItem('voice_outputId') || 'default',
@@ -27,7 +54,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     useEffect(() => {
         const getDevices = async () => {
             try {
-                // Request permission first to get device labels
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 const allDevices = await navigator.mediaDevices.enumerateDevices();
                 setDevices(allDevices.filter(d => d.kind === 'audioinput' || d.kind === 'audiooutput'));
@@ -51,8 +77,67 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             return next;
         });
-        // Dispatch event for components to pick up
         window.dispatchEvent(new CustomEvent('voice_settings_updated', { detail: { key, value } }));
+    };
+
+    const handleSaveDisplayName = async () => {
+        if (!currentUser || !newDisplayName.trim()) return;
+        if (newDisplayName === userData?.displayName) return;
+
+        try {
+            setIsSavingName(true);
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                displayName: newDisplayName.trim()
+            });
+            setIsSavingName(false);
+            showAlert('Başarılı', 'Kullanıcı adı başarıyla güncellendi!');
+        } catch (err: any) {
+            console.error("Name update error:", err);
+            setIsSavingName(false);
+            showAlert('Hata', `Kullanıcı adı güncellenirken bir hata oluştu: ${err.message}`);
+        }
+    };
+
+    const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const file = e.target.files[0];
+            const imageDataUrl = URL.createObjectURL(file);
+            setImage(imageDataUrl);
+        }
+    };
+
+    const onCropComplete = useCallback((_croppedArea: any, croppedAreaPixels: any) => {
+        setCroppedAreaPixels(croppedAreaPixels);
+    }, []);
+
+    const handleAvatarUpload = async () => {
+        if (!image || !croppedAreaPixels || !currentUser) return;
+
+        try {
+            setUploading(true);
+            setUploadStatus('Hazırlanıyor...');
+
+            const base64Image = await getCroppedImg(image, croppedAreaPixels);
+
+            if (!base64Image) {
+                throw new Error("Kırpma işlemi başarısız oldu.");
+            }
+
+            setUploadStatus('Kaydediliyor...');
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                photoURL: base64Image
+            });
+
+            setUploading(false);
+            setUploadStatus('');
+            setImage(null);
+            showAlert('Başarılı', 'Profil resmi başarıyla güncellendi!');
+        } catch (err: any) {
+            console.error("Upload error detail:", err);
+            setUploading(false);
+            setUploadStatus('');
+            showAlert('Hata', `Resim yüklenirken bir hata oluştu: ${err.message}`);
+        }
     };
 
     if (!isOpen) return null;
@@ -66,24 +151,70 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <h2>Hesabım</h2>
                         </div>
                         <div className="settings-section">
-                            <div className="settings-field">
-                                <label className="settings-label">Kullanıcı Adı</label>
-                                <input className="settings-input" value={userData?.displayName || ''} disabled />
+                            <div className="account-profile-card">
+                                <div
+                                    className="account-avatar-wrapper"
+                                    onClick={() => !uploading && fileInputRef.current?.click()}
+                                    style={{ cursor: uploading ? 'wait' : 'pointer' }}
+                                >
+                                    {userData?.photoURL ? (
+                                        <img src={userData.photoURL} alt="Avatar" className="large-avatar" />
+                                    ) : (
+                                        <div className="large-avatar placeholder">
+                                            {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0)}
+                                        </div>
+                                    )}
+                                    <div className="avatar-overlay">
+                                        <FaCamera />
+                                        <span>DEĞİŞTİR</span>
+                                    </div>
+                                    {uploading && <div className="upload-spinner" />}
+                                </div>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    style={{ display: 'none' }}
+                                    accept="image/*"
+                                    onChange={onFileChange}
+                                />
+                                <div className="account-info-header">
+                                    <span className="account-username">{userData?.displayName || 'Kullanıcı'}</span>
+                                    <span className="account-tag">#0001</span>
+                                </div>
+                            </div>
+
+                            <div className="settings-field" style={{ marginTop: '24px' }}>
+                                <label className="settings-label">KULLANICI ADI</label>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <input
+                                        className="settings-input"
+                                        value={newDisplayName}
+                                        onChange={(e) => setNewDisplayName(e.target.value)}
+                                        placeholder="Kullanıcı adı girin"
+                                    />
+                                    {newDisplayName !== userData?.displayName && (
+                                        <button
+                                            className="btn-primary"
+                                            style={{ padding: '0 20px', height: '40px', fontSize: '12px' }}
+                                            onClick={handleSaveDisplayName}
+                                            disabled={isSavingName}
+                                        >
+                                            {isSavingName ? 'KAYDEDİLİYOR...' : 'KAYDET'}
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                             <div className="settings-field">
-                                <label className="settings-label">E-posta</label>
-                                <input className="settings-input" value={currentUser?.email || ''} disabled />
+                                <label className="settings-label">E-POSTA</label>
+                                <input className="settings-input" value={currentUser?.email || ''} disabled style={{ opacity: 0.6 }} />
                             </div>
-                            <div className="settings-field">
-                                <label className="settings-label">UID</label>
-                                <input className="settings-input" value={currentUser?.uid || ''} disabled style={{ fontSize: 10 }} />
-                            </div>
+
                             <button
                                 className="settings-input"
                                 style={{ background: 'var(--danger)', color: 'white', cursor: 'pointer', fontWeight: 'bold', height: '40px', marginTop: '20px' }}
-                                onClick={() => auth.signOut()}
+                                onClick={logoutCurrent}
                             >
-                                Çıkış Yap
+                                Oturumu Kapat
                             </button>
                         </div>
                     </>
@@ -219,26 +350,65 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
 
     return (
-        <div className="settings-overlay">
-            <div className="settings-sidebar">
-                <div className="settings-nav">
-                    <h3>Kullanıcı Ayarları</h3>
-                    <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => setActiveTab('account')}>Hesabım</div>
-                    <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => setActiveTab('voice')}>Ses ve Görüntü</div>
-                    <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Görünüm</div>
+        <>
+            <div className="settings-overlay">
+                <div className="settings-sidebar">
+                    <div className="settings-nav">
+                        <h3>Kullanıcı Ayarları</h3>
+                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => setActiveTab('account')}>Hesabım</div>
+                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => setActiveTab('voice')}>Ses ve Görüntü</div>
+                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Görünüm</div>
+                    </div>
+                </div>
+
+                <div className="settings-content-wrapper">
+                    {renderContent()}
+                </div>
+
+                <div className="settings-close" onClick={onClose}>
+                    <div className="settings-close-circle">
+                        <FaTimes size={18} />
+                    </div>
+                    <span>ESC</span>
                 </div>
             </div>
 
-            <div className="settings-content-wrapper">
-                {renderContent()}
-            </div>
-
-            <div className="settings-close" onClick={onClose}>
-                <div className="settings-close-circle">
-                    <FaTimes size={18} />
+            {/* Cropper Modal Overlay */}
+            {image && (
+                <div className="cropper-overlay">
+                    <div className="cropper-container">
+                        <Cropper
+                            image={image}
+                            crop={crop}
+                            zoom={zoom}
+                            aspect={1}
+                            cropShape="round"
+                            showGrid={false}
+                            onCropChange={setCrop}
+                            onCropComplete={onCropComplete}
+                            onZoomChange={setZoom}
+                        />
+                    </div>
+                    <div className="cropper-controls">
+                        <input
+                            type="range"
+                            value={zoom}
+                            min={1}
+                            max={3}
+                            step={0.1}
+                            aria-labelledby="Zoom"
+                            onChange={(e) => setZoom(Number(e.target.value))}
+                            className="cropper-slider"
+                        />
+                        <div className="cropper-btns">
+                            <button className="btn-secondary" onClick={() => setImage(null)} disabled={uploading}>İPTAL</button>
+                            <button className="btn-primary" onClick={handleAvatarUpload} disabled={uploading}>
+                                {uploading ? uploadStatus : 'UYGULA VE YÜKLE'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <span>ESC</span>
-            </div>
-        </div>
+            )}
+        </>
     );
 }

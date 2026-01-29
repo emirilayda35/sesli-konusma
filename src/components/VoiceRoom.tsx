@@ -1,25 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaMicrophone, FaMicrophoneSlash, FaBolt } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash } from 'react-icons/fa';
+import { useUI } from '../contexts/UIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
-import { db } from '../firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, deleteDoc, getDocs } from 'firebase/firestore';
 
 interface VoiceRoomProps {
     roomId: string;
 }
 
 export default function VoiceRoom({ roomId }: VoiceRoomProps) {
-    const { currentUser, userData } = useAuth();
+    const { currentUser, userData, db } = useAuth();
+    const { showAlert } = useUI();
     const [isMicOn, setIsMicOn] = useState(true);
+    const [isDeafened, setIsDeafened] = useState(false);
     const [isGameMode, setIsGameMode] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [sensitivity, setSensitivity] = useState(parseInt(localStorage.getItem('voice_sensitivity') || '10'));
 
-    const { peers, peerNames, localStream } = useWebRTC(
+    const { peers, peerNames, localStream, screenStream, toggleScreenShare, isCameraOn, toggleCamera } = useWebRTC(
         roomId,
         currentUser?.uid || 'anonymous',
-        currentUser?.displayName || 'Anonim'
+        currentUser?.displayName || 'Anonim',
+        db
     );
 
     useEffect(() => {
@@ -28,9 +31,40 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 setSensitivity(parseInt(e.detail.value));
             }
         };
+
+        const handleGlobalAudio = (e: any) => {
+            if (e.detail.type === 'mic') {
+                setIsMicOn(!e.detail.value);
+            } else if (e.detail.type === 'deafen') {
+                setIsDeafened(e.detail.value);
+            }
+        };
+
         window.addEventListener('voice_settings_updated', handleSettingsUpdate);
-        return () => window.removeEventListener('voice_settings_updated', handleSettingsUpdate);
+        window.addEventListener('global_audio_state', handleGlobalAudio);
+        return () => {
+            window.removeEventListener('voice_settings_updated', handleSettingsUpdate);
+            window.removeEventListener('global_audio_state', handleGlobalAudio);
+        };
     }, []);
+
+    // Auto-enable camera for video calls
+    const cameraInitialized = useRef(false);
+    useEffect(() => {
+        if (cameraInitialized.current) return;
+
+        const unsubRoom = onSnapshot(doc(db, 'rooms', roomId), (docSnap) => {
+            if (docSnap.exists() && !cameraInitialized.current) {
+                const roomData = docSnap.data();
+                if (roomData.type === 'video' && !isCameraOn) {
+                    toggleCamera();
+                    cameraInitialized.current = true;
+                }
+            }
+        });
+
+        return () => unsubRoom();
+    }, [roomId, db]);
 
     // Voice detection for local user
     useEffect(() => {
@@ -51,7 +85,6 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
         const checkVolume = () => {
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
-            // Threshold calculation based on sensitivity (0-100)
             const threshold = (100 - sensitivity) / 2;
             setIsSpeaking(average > threshold);
         };
@@ -80,7 +113,6 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
             try {
                 if ('wakeLock' in navigator) {
                     wakeLock = await (navigator as any).wakeLock.request('screen');
-                    console.log('Wake Lock active');
                 }
             } catch (err: any) {
                 console.error(`${err.name}, ${err.message}`);
@@ -95,33 +127,50 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
 
     return (
         <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, padding: 20 }}>
+            <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16, padding: 20 }}>
 
                 {/* Local User Card */}
-                <div className={`speaker-card ${isGameMode ? 'low-perf' : ''} ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', aspectRatio: '1/1', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
-                    {userData?.photoURL ? (
+                <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
+                    {screenStream ? (
+                        <video
+                            ref={(el) => { if (el) el.srcObject = screenStream; }}
+                            autoPlay
+                            muted
+                            playsInline
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                        />
+                    ) : (isCameraOn && localStream) ? (
+                        <video
+                            ref={(el) => { if (el) el.srcObject = localStream; }}
+                            autoPlay
+                            muted
+                            playsInline
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+                        />
+                    ) : userData?.photoURL ? (
                         <img src={userData.photoURL} alt="" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
                     ) : (
                         <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
                             {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
                         </div>
                     )}
-                    <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
                         <span style={{ fontWeight: 600 }}>{userData?.displayName || 'Sen'} (Sen)</span>
                         {!isMicOn && <FaMicrophoneSlash style={{ color: 'var(--danger)' }} />}
                     </div>
-                    {!isGameMode && isMicOn && isSpeaking && <div className="voice-wave"></div>}
                 </div>
 
-                {/* Remote Peers */}
+                {/* Remote Participants */}
                 {Array.from(peers.entries()).map(([peerId, stream]) => (
-                    <RemoteAudio
+                    <RemoteParticipant
                         key={peerId}
                         peerId={peerId}
                         stream={stream}
                         name={peerNames.get(peerId) || 'Yükleniyor...'}
                         isGameMode={isGameMode}
                         globalSensitivity={sensitivity}
+                        isDeafened={isDeafened}
+                        db={db}
                     />
                 ))}
             </div>
@@ -131,7 +180,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                     onClick={() => {
                         const link = `${window.location.origin}/?room=${roomId}`;
                         navigator.clipboard.writeText(link);
-                        alert('Davet linki kopyalandı!');
+                        showAlert('Davet', 'Davet linki kopyalandı!');
                     }}
                     className="control-circle"
                     style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--bg-accent)', color: 'white', fontSize: 13, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
@@ -148,6 +197,24 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
+                    onClick={toggleScreenShare}
+                    className={`control-circle`}
+                    style={{ width: 48, height: 48, borderRadius: '50%', background: screenStream ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
+                    title="Ekran Paylaş"
+                >
+                    <FaDesktop />
+                </button>
+
+                <button
+                    onClick={toggleCamera}
+                    className={`control-circle`}
+                    style={{ width: 48, height: 48, borderRadius: '50%', background: isCameraOn ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
+                    title={isCameraOn ? "Kamerayı Kapat" : "Kamerayı Aç"}
+                >
+                    {isCameraOn ? <FaVideo /> : <FaVideoSlash />}
+                </button>
+
+                <button
                     onClick={() => setIsGameMode(!isGameMode)}
                     className={`control-circle`}
                     style={{ width: 48, height: 48, borderRadius: '50%', background: isGameMode ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
@@ -157,7 +224,19 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
-                    onClick={() => window.location.reload()}
+                    onClick={async () => {
+                        const memberRef = doc(db, `rooms/${roomId}/members`, currentUser?.uid || 'anon');
+                        await deleteDoc(memberRef);
+
+                        // Check if room is empty
+                        const membersRef = collection(db, `rooms/${roomId}/members`);
+                        const snap = await getDocs(membersRef);
+                        if (snap.empty) {
+                            await deleteDoc(doc(db, 'rooms', roomId));
+                        }
+
+                        window.location.reload();
+                    }}
                     className="control-circle"
                     style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--danger)', color: 'white', fontSize: 13, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
                 >
@@ -168,11 +247,14 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
     );
 }
 
-function RemoteAudio({ peerId, stream, name, isGameMode, globalSensitivity }: { peerId: string, stream: MediaStream, name: string, isGameMode: boolean, globalSensitivity: number }) {
+function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity, isDeafened, db }: { peerId: string, stream: MediaStream, name: string, isGameMode: boolean, globalSensitivity: number, isDeafened: boolean, db: any }) {
     const audioRef = useRef<HTMLAudioElement>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
     const [isSpeaking, setIsSpeaking] = useState(false);
+    const [displayName, setDisplayName] = useState(name);
     const [photoURL, setPhotoURL] = useState<string | null>(null);
     const [volume, setVolume] = useState(parseInt(localStorage.getItem('voice_outputVolume') || '100'));
+    const [hasVideo, setHasVideo] = useState(false);
 
     useEffect(() => {
         const handleSettingsUpdate = (e: any) => {
@@ -192,26 +274,37 @@ function RemoteAudio({ peerId, stream, name, isGameMode, globalSensitivity }: { 
 
     useEffect(() => {
         if (audioRef.current) {
-            audioRef.current.volume = volume / 100;
+            audioRef.current.volume = isDeafened ? 0 : (volume / 100);
         }
-    }, [volume]);
+    }, [volume, isDeafened]);
 
     useEffect(() => {
-        // Fetch user photo
-        const fetchPhoto = async () => {
-            const q = query(collection(db, 'users'), where('uid', '==', peerId));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-                setPhotoURL(snap.docs[0].data().photoURL);
+        const unsub = onSnapshot(doc(db, 'users', peerId), (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setPhotoURL(data.photoURL);
+                if (data.displayName) setDisplayName(data.displayName);
             }
-        };
-        fetchPhoto();
+        });
 
         if (audioRef.current && stream) {
             audioRef.current.srcObject = stream;
         }
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+        }
 
-        // Remote voice detection
+        const checkTracks = () => {
+            setHasVideo(stream.getVideoTracks().length > 0);
+        };
+        checkTracks();
+        stream.onaddtrack = checkTracks;
+        stream.onremovetrack = checkTracks;
+
+        return () => unsub();
+    }, [peerId, stream]);
+
+    useEffect(() => {
         const audioContext = new AudioContext();
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
@@ -219,35 +312,33 @@ function RemoteAudio({ peerId, stream, name, isGameMode, globalSensitivity }: { 
         source.connect(analyser);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        let interval: any;
-
-        const checkVolume = () => {
+        let interval = setInterval(() => {
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
             const threshold = (100 - globalSensitivity) / 2;
             setIsSpeaking(average > threshold);
-        };
-
-        interval = setInterval(checkVolume, 100);
+        }, 100);
 
         return () => {
             clearInterval(interval);
             audioContext.close();
         };
-    }, [stream, peerId, globalSensitivity]);
+    }, [stream, globalSensitivity]);
 
     return (
-        <div className={`speaker-card ${isGameMode ? 'low-perf' : ''} ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', aspectRatio: '1/1', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
+        <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
             <audio ref={audioRef} autoPlay />
-            {photoURL ? (
+            {hasVideo ? (
+                <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            ) : photoURL ? (
                 <img src={photoURL} alt="" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (
-                <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>{name.charAt(0)}</div>
+                <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>{displayName.charAt(0)}</div>
             )}
-            <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontWeight: 600 }}>{name}</span>
+            <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
+                <span style={{ fontWeight: 600 }}>{displayName}</span>
             </div>
-            {!isGameMode && isSpeaking && <div className="voice-wave"></div>}
+            {!isGameMode && isSpeaking && !hasVideo && <div className="voice-wave"></div>}
         </div>
     );
 }
