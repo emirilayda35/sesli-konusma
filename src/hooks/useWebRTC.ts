@@ -44,59 +44,25 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
     // --- Helper: Combine Streams & Update Peers ---
     const updateLocalAndPeers = async () => {
-        // --- Audio Mixing Logic ---
-        if (!audioContextRef.current) {
-            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-            destinationRef.current = audioContextRef.current.createMediaStreamDestination();
-        }
-
-        const ctx = audioContextRef.current;
-        const dest = destinationRef.current!;
-
-        // Clean up previous sources if they changed
-        if (micSourceRef.current) {
-            micSourceRef.current.disconnect();
-            micSourceRef.current = null;
-        }
-        if (screenSourceRef.current) {
-            screenSourceRef.current.disconnect();
-            screenSourceRef.current = null;
-        }
-
-        // Connect Microphone
-        if (audioStreamRef.current && audioStreamRef.current.getAudioTracks().length > 0) {
-            try {
-                micSourceRef.current = ctx.createMediaStreamSource(audioStreamRef.current);
-                micSourceRef.current.connect(dest);
-            } catch (e) { console.error("Mic mix error", e); }
-        }
-
-        // Connect Screen Audio
-        if (screenStream && screenStream.getAudioTracks().length > 0) {
-            try {
-                screenSourceRef.current = ctx.createMediaStreamSource(screenStream);
-                screenSourceRef.current.connect(dest);
-            } catch (e) { console.error("Screen audio mix error", e); }
-        }
-
-        mixedAudioStreamRef.current = dest.stream;
-
         const newStream = new MediaStream();
-        if (mixedAudioStreamRef.current) {
-            mixedAudioStreamRef.current.getAudioTracks().forEach(t => newStream.addTrack(t));
+
+        // Add Mic Audio
+        if (audioStreamRef.current) {
+            audioStreamRef.current.getAudioTracks().forEach(t => newStream.addTrack(t));
         }
+
+        // Add Camera Video
         if (videoStreamRef.current) {
-            videoStreamRef.current.getTracks().forEach(t => newStream.addTrack(t));
+            videoStreamRef.current.getVideoTracks().forEach(t => newStream.addTrack(t));
         }
 
         localStream.current = newStream;
         setActiveStream(newStream); // Triggers React render
         setIsStreamReady(true);
 
-        console.log('[WEBRTC_DEBUG] Combined Local Stream', {
+        console.log('[WEBRTC_DEBUG] Combined Local Stream (No Mixing)', {
             audio: newStream.getAudioTracks().length,
             video: newStream.getVideoTracks().length,
-            mixed: !!mixedAudioStreamRef.current
         });
 
         // Update all connected peers
@@ -231,7 +197,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     function updatePeerTracks(pc: RTCPeerConnection, stream: MediaStream | null, currentScreenStream: MediaStream | null) {
         const senders = pc.getSenders();
 
-        // Priority: Screen Share Video > Camera Video
+        // 1. Manage Video Track (Priority: Screen > Camera)
         let activeVideoTrack: MediaStreamTrack | null = null;
         if (currentScreenStream && currentScreenStream.getVideoTracks().length > 0) {
             activeVideoTrack = currentScreenStream.getVideoTracks()[0];
@@ -239,16 +205,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             activeVideoTrack = stream.getVideoTracks()[0];
         }
 
-        // Active Audio Track (Always mixed if localStream is updated via updateLocalAndPeers)
-        let activeAudioTrack: MediaStreamTrack | null = null;
-        if (stream && stream.getAudioTracks().length > 0) {
-            activeAudioTrack = stream.getAudioTracks()[0];
-        }
-
-        const videoSender = senders.find(s => s.track?.kind === 'video' || s.track === null);
-        const audioSender = senders.find(s => s.track?.kind === 'audio' || s.track === null);
-
-        // Update Video
+        const videoSender = senders.find(s => s.track?.kind === 'video');
         if (activeVideoTrack) {
             if (videoSender) {
                 if (videoSender.track?.id !== activeVideoTrack.id) {
@@ -261,18 +218,56 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             videoSender.replaceTrack(null).catch(e => console.warn("Video clear fail", e));
         }
 
-        // Update Audio
-        if (activeAudioTrack) {
-            if (audioSender) {
-                if (audioSender.track?.id !== activeAudioTrack.id) {
-                    audioSender.replaceTrack(activeAudioTrack).catch(e => console.warn("Audio replace fail", e));
+        // 2. Manage Audio Tracks (Separate Mic and Screen Audio)
+        // We want to ensure BOTH mic track and screen audio track are sent if they exist.
+
+        const micTrack = stream?.getAudioTracks()[0] || null;
+        const screenAudioTrack = currentScreenStream?.getAudioTracks()[0] || null;
+
+        // Helper to sync a specific track type to a sender if it exists
+        const syncTrack = (track: MediaStreamTrack | null, label: string) => {
+            // We use a custom property or just track IDs to identify senders
+            // But standard WebRTC doesn't have labels for senders. 
+            // We'll look for an audio sender that matches the track ID.
+            let sender = senders.find(s => s.track?.id === track?.id);
+
+            if (track) {
+                if (!sender) {
+                    // Find an empty audio sender to reuse or add new
+                    const emptyAudioSender = senders.find(s => s.track?.kind === 'audio' && !s.track);
+                    if (emptyAudioSender) {
+                        emptyAudioSender.replaceTrack(track).catch(e => console.warn(`${label} reuse fail`, e));
+                    } else {
+                        pc.addTrack(track, currentScreenStream || stream!);
+                    }
                 }
             } else {
-                pc.addTrack(activeAudioTrack, stream!);
+                // If we had a sender for this label's old track but now track is gone...
+                // This is complex without mapping. For now, we'll just ensure all tracks in stream are present.
             }
-        } else if (audioSender) {
-            audioSender.replaceTrack(null).catch(e => console.warn("Audio clear fail", e));
-        }
+        };
+
+        // Simplified approach: Ensure all required tracks are being sent
+        const activeAudioTracks: MediaStreamTrack[] = [];
+        if (micTrack) activeAudioTracks.push(micTrack);
+        if (screenAudioTrack) activeAudioTracks.push(screenAudioTrack);
+
+        // Remove senders for tracks that are no longer active
+        senders.forEach(s => {
+            if (s.track?.kind === 'audio' && s.track) {
+                if (!activeAudioTracks.find(t => t.id === s.track?.id)) {
+                    s.replaceTrack(null).catch(e => console.warn("Audio track remove fail", e));
+                }
+            }
+        });
+
+        // Add/Sync active tracks
+        activeAudioTracks.forEach(t => {
+            const sender = senders.find(s => s.track?.id === t.id);
+            if (!sender) {
+                pc.addTrack(t, currentScreenStream || stream!);
+            }
+        });
     }
 
     // Main Room Logic
@@ -359,20 +354,28 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         }
 
         pc.ontrack = (event) => {
-            console.log(`[WEBRTC_DEBUG] ontrack from ${remoteUserId}: ${event.track.kind}, enabled=${event.track.enabled}`);
+            console.log(`[WEBRTC_DEBUG] ontrack from ${remoteUserId}: ${event.track.kind}, id=${event.track.id}`);
             event.track.enabled = true;
 
-            const newStream = new MediaStream();
             setPeers(prev => {
                 const next = new Map(prev);
-                const existingStream = next.get(remoteUserId);
-                if (existingStream) {
-                    existingStream.getTracks().forEach(t => {
-                        if (t.id !== event.track.id) newStream.addTrack(t);
-                    });
+                let stream = next.get(remoteUserId);
+                if (!stream) {
+                    stream = new MediaStream();
                 }
-                newStream.addTrack(event.track);
-                return next.set(remoteUserId, newStream);
+
+                // Only add if not already present
+                if (!stream.getTracks().find(t => t.id === event.track.id)) {
+                    stream.addTrack(event.track);
+
+                    // Listen for track ending to clean up UI
+                    event.track.onended = () => {
+                        console.log(`[WEBRTC_DEBUG] Track ended for ${remoteUserId}: ${event.track.kind}`);
+                        // We might need to trigger a re-render here, but MediaStream auto-updates
+                    };
+                }
+
+                return next.set(remoteUserId, new MediaStream(stream.getTracks())); // Fresh ref for React
             });
         };
 
@@ -517,36 +520,41 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         if (screenStream) {
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
-            updateLocalAndPeers(); // Trigger remix and update
+            updateLocalAndPeers();
         } else {
             console.log("[WEBRTC_DEBUG] Requesting Screen Share...");
             try {
                 const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-                // Constraints for screen share
-                const constraints: any = {
-                    video: {
-                        cursor: "always",
-                        displaySurface: "monitor"
-                    },
+                // Desktop constraints: Request audio
+                const desktopConstraints: any = {
+                    video: { cursor: "always" },
                     audio: {
                         echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 44100
+                        noiseSuppression: false, // Don't suppress music/videos
+                        autoGainControl: false,
+                        suppressLocalAudioPlayback: false
                     }
                 };
 
-                // Mobile fallback: simplified constraints
+                // Mobile constraints: Minimal video only (mobile browsers mostly fail if audio is true or constraints are complex)
+                const mobileConstraints = { video: true };
+
                 let stream;
-                try {
-                    stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-                } catch (firstErr) {
-                    console.warn("[WEBRTC_DEBUG] Screen share first attempt failed, trying simple constraints", firstErr);
-                    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: !isMobile });
+                if (isMobile) {
+                    console.log("[WEBRTC_DEBUG] Mobile detected, using restricted constraints");
+                    stream = await navigator.mediaDevices.getDisplayMedia(mobileConstraints);
+                } else {
+                    try {
+                        stream = await navigator.mediaDevices.getDisplayMedia(desktopConstraints);
+                    } catch (e) {
+                        console.warn("[WEBRTC_DEBUG] Complex constraints failed, trying simple", e);
+                        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                    }
                 }
 
                 setScreenStream(stream);
-                updateLocalAndPeers(); // This will mix audio and update peers
+                updateLocalAndPeers();
 
                 stream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
@@ -557,7 +565,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 if ((err as any).name === 'NotAllowedError') {
                     // Ignore, user cancelled
                 } else {
-                    alert("Ekran paylaşımı başlatılamadı. Lütfen tarayıcı izinlerini kontrol edin.");
+                    alert("Ekran paylaşımı başlatılamadı. Mobil cihazlarda 'Ekran Kaydı' izni kapalı olabilir veya tarayıcınız bu özelliği kısıtlıyor olabilir.");
                 }
             }
         }
