@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { FaMinus, FaRegSquare, FaTimes } from 'react-icons/fa';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+// Safe Tauri import pattern
+let getCurrentWindow: any = () => null;
+
+if ((window as any).__TAURI__) {
+    import('@tauri-apps/api/window').then(module => {
+        getCurrentWindow = module.getCurrentWindow;
+    });
+}
+// Actually, you can't do this easily with sync rendering.
+// But if TitleBar is unused, it doesn't matter.
+
 const isTauri = Boolean((window as any).__TAURI__);
 
 const TitleBar = () => {
