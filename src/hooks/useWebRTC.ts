@@ -36,12 +36,54 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const [mountedAt] = useState(Date.now());
     const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isStreamReady, setIsStreamReady] = useState(false);
+    const mixedAudioStreamRef = useRef<MediaStream | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+    const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+    const screenSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
     // --- Helper: Combine Streams & Update Peers ---
-    const updateLocalAndPeers = () => {
+    const updateLocalAndPeers = async () => {
+        // --- Audio Mixing Logic ---
+        if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            destinationRef.current = audioContextRef.current.createMediaStreamDestination();
+        }
+
+        const ctx = audioContextRef.current;
+        const dest = destinationRef.current!;
+
+        // Clean up previous sources if they changed
+        if (micSourceRef.current) {
+            micSourceRef.current.disconnect();
+            micSourceRef.current = null;
+        }
+        if (screenSourceRef.current) {
+            screenSourceRef.current.disconnect();
+            screenSourceRef.current = null;
+        }
+
+        // Connect Microphone
+        if (audioStreamRef.current && audioStreamRef.current.getAudioTracks().length > 0) {
+            try {
+                micSourceRef.current = ctx.createMediaStreamSource(audioStreamRef.current);
+                micSourceRef.current.connect(dest);
+            } catch (e) { console.error("Mic mix error", e); }
+        }
+
+        // Connect Screen Audio
+        if (screenStream && screenStream.getAudioTracks().length > 0) {
+            try {
+                screenSourceRef.current = ctx.createMediaStreamSource(screenStream);
+                screenSourceRef.current.connect(dest);
+            } catch (e) { console.error("Screen audio mix error", e); }
+        }
+
+        mixedAudioStreamRef.current = dest.stream;
+
         const newStream = new MediaStream();
-        if (audioStreamRef.current) {
-            audioStreamRef.current.getTracks().forEach(t => newStream.addTrack(t));
+        if (mixedAudioStreamRef.current) {
+            mixedAudioStreamRef.current.getAudioTracks().forEach(t => newStream.addTrack(t));
         }
         if (videoStreamRef.current) {
             videoStreamRef.current.getTracks().forEach(t => newStream.addTrack(t));
@@ -53,7 +95,8 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
         console.log('[WEBRTC_DEBUG] Combined Local Stream', {
             audio: newStream.getAudioTracks().length,
-            video: newStream.getVideoTracks().length
+            video: newStream.getVideoTracks().length,
+            mixed: !!mixedAudioStreamRef.current
         });
 
         // Update all connected peers
@@ -186,70 +229,49 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
     // Helper to add/replace tracks strictly
     function updatePeerTracks(pc: RTCPeerConnection, stream: MediaStream | null, currentScreenStream: MediaStream | null) {
-        // If nothing to show, clear all
         const senders = pc.getSenders();
-        if (!stream && !currentScreenStream) {
-            senders.forEach(s => s.track && s.replaceTrack(null).catch(e => console.warn('Clear track error', e)));
-            return;
+
+        // Priority: Screen Share Video > Camera Video
+        let activeVideoTrack: MediaStreamTrack | null = null;
+        if (currentScreenStream && currentScreenStream.getVideoTracks().length > 0) {
+            activeVideoTrack = currentScreenStream.getVideoTracks()[0];
+        } else if (stream && stream.getVideoTracks().length > 0) {
+            activeVideoTrack = stream.getVideoTracks()[0];
         }
 
-        console.log('[WEBRTC_DEBUG] updatePeerTracks', { hasStream: !!stream, hasScreen: !!currentScreenStream });
+        // Active Audio Track (Always mixed if localStream is updated via updateLocalAndPeers)
+        let activeAudioTrack: MediaStreamTrack | null = null;
+        if (stream && stream.getAudioTracks().length > 0) {
+            activeAudioTrack = stream.getAudioTracks()[0];
+        }
 
-        // Priority: Screen Share > Camera Video
-        if (currentScreenStream) {
-            // Video (Screen)
-            const screenTrack = currentScreenStream.getVideoTracks()[0];
-            const videoSender = senders.find(s => s.track?.kind === 'video');
-            if (screenTrack) {
-                if (videoSender) {
-                    console.log('[WEBRTC_DEBUG] Replacing video track with screen track');
-                    videoSender.replaceTrack(screenTrack);
-                } else {
-                    console.log('[WEBRTC_DEBUG] Adding screen track');
-                    pc.addTrack(screenTrack, currentScreenStream);
-                }
-            }
+        const videoSender = senders.find(s => s.track?.kind === 'video' || s.track === null);
+        const audioSender = senders.find(s => s.track?.kind === 'audio' || s.track === null);
 
-            // Audio (Local Mic)
-            const audioSender = senders.find(s => s.track?.kind === 'audio');
-            if (stream) {
-                const audioTrack = stream.getAudioTracks()[0];
-                if (audioTrack) {
-                    if (audioSender) {
-                        audioSender.replaceTrack(audioTrack);
-                    } else {
-                        console.log('[WEBRTC_DEBUG] Adding audio track');
-                        pc.addTrack(audioTrack, stream);
-                    }
+        // Update Video
+        if (activeVideoTrack) {
+            if (videoSender) {
+                if (videoSender.track?.id !== activeVideoTrack.id) {
+                    videoSender.replaceTrack(activeVideoTrack).catch(e => console.warn("Video replace fail", e));
                 }
-            } else if (audioSender) {
-                // Mute mic if stream is null but screen is on
-                audioSender.replaceTrack(null);
+            } else {
+                pc.addTrack(activeVideoTrack, currentScreenStream || stream!);
             }
-        } else if (stream) {
-            // Normal Camera + Mic
-            stream.getTracks().forEach(track => {
-                const sender = senders.find(s => s.track?.kind === track.kind);
-                if (sender) {
-                    console.log(`[WEBRTC_DEBUG] Replacing ${track.kind} track`);
-                    sender.replaceTrack(track).catch(e => {
-                        console.warn("[WEBRTC_DEBUG] Replace track failed, adding fallback", e);
-                        pc.addTrack(track, stream);
-                    });
-                } else {
-                    console.log(`[WEBRTC_DEBUG] Adding ${track.kind} track`);
-                    pc.addTrack(track, stream);
-                }
-            });
+        } else if (videoSender) {
+            videoSender.replaceTrack(null).catch(e => console.warn("Video clear fail", e));
+        }
 
-            // Handle Camera Off (Video Sender -> Null)
-            if (stream.getVideoTracks().length === 0) {
-                const videoSender = senders.find(s => s.track?.kind === 'video');
-                if (videoSender) {
-                    console.log('[WEBRTC_DEBUG] Setting video sender to null (camera off)');
-                    videoSender.replaceTrack(null);
+        // Update Audio
+        if (activeAudioTrack) {
+            if (audioSender) {
+                if (audioSender.track?.id !== activeAudioTrack.id) {
+                    audioSender.replaceTrack(activeAudioTrack).catch(e => console.warn("Audio replace fail", e));
                 }
+            } else {
+                pc.addTrack(activeAudioTrack, stream!);
             }
+        } else if (audioSender) {
+            audioSender.replaceTrack(null).catch(e => console.warn("Audio clear fail", e));
         }
     }
 
@@ -495,27 +517,48 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         if (screenStream) {
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
-            pcRef.current.forEach(pc => {
-                updatePeerTracks(pc, localStream.current, null);
-            });
+            updateLocalAndPeers(); // Trigger remix and update
         } else {
+            console.log("[WEBRTC_DEBUG] Requesting Screen Share...");
             try {
-                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+                // Constraints for screen share
+                const constraints: any = {
+                    video: {
+                        cursor: "always",
+                        displaySurface: "monitor"
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 44100
+                    }
+                };
+
+                // Mobile fallback: simplified constraints
+                let stream;
+                try {
+                    stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+                } catch (firstErr) {
+                    console.warn("[WEBRTC_DEBUG] Screen share first attempt failed, trying simple constraints", firstErr);
+                    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: !isMobile });
+                }
+
                 setScreenStream(stream);
-                const screenTrack = stream.getVideoTracks()[0];
+                updateLocalAndPeers(); // This will mix audio and update peers
 
-                pcRef.current.forEach(pc => {
-                    updatePeerTracks(pc, localStream.current, stream);
-                });
-
-                screenTrack.onended = () => {
+                stream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
-                    pcRef.current.forEach(pc => {
-                        updatePeerTracks(pc, localStream.current, null);
-                    });
+                    updateLocalAndPeers();
                 };
             } catch (err) {
                 console.error("Screen share error:", err);
+                if ((err as any).name === 'NotAllowedError') {
+                    // Ignore, user cancelled
+                } else {
+                    alert("Ekran paylaşımı başlatılamadı. Lütfen tarayıcı izinlerini kontrol edin.");
+                }
             }
         }
     }
