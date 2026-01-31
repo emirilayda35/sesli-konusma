@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash, FaChevronLeft } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash, FaChevronLeft, FaUserPlus, FaGamepad, FaSignOutAlt } from 'react-icons/fa';
 import { useUI } from '../contexts/UIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
@@ -179,6 +179,36 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     background: rgba(255,255,255,0.2);
                     transform: scale(1.1);
                 }
+                .control-btn-main {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 50%;
+                    border: none;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 1.2rem;
+                    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                }
+                .control-btn-main:hover {
+                    transform: scale(1.15) translateY(-4px);
+                    box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+                }
+                .control-btn-main:active {
+                    transform: scale(0.95);
+                }
+                @media (max-width: 768px) {
+                    .room-controls {
+                        gap: 8px !important;
+                        padding: 10px 14px !important;
+                    }
+                    .control-btn-main {
+                        width: 42px;
+                        height: 42px;
+                        font-size: 1rem;
+                    }
+                }
             `}</style>
             <div className="voice-header" style={{ justifyContent: 'flex-start' }}>
                 {onBack && (
@@ -309,91 +339,111 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                 </div>
             )}
 
-            <div className="room-controls" style={{
-                height: 80,
-                background: 'var(--bg-tertiary)',
-                borderRadius: '12px 12px 0 0',
-                ...(window.innerWidth <= 768 ? {
-                    position: 'fixed',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: 'auto',
-                    padding: '16px',
-                    background: 'rgba(30, 31, 34, 0.95)',
-                    backdropFilter: 'blur(10px)',
-                    zIndex: 1000,
-                    borderTop: '1px solid rgba(255,255,255,0.1)'
-                } : {})
+            <div className="room-controls-wrapper" style={{
+                position: 'fixed',
+                bottom: 24,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 1000,
+                width: 'auto',
+                display: 'flex',
+                justifyContent: 'center',
+                pointerEvents: 'none'
             }}>
-                <button
-                    onClick={() => {
-                        playSound('click');
-                        const link = `${window.location.origin}/?room=${roomId}`;
-                        navigator.clipboard.writeText(link);
-                        showAlert('Davet', 'Davet linki kopyalandı!');
-                    }}
-                    className="control-circle"
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--bg-primary)', color: 'white', fontSize: 13, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                >
-                    DAVET
-                </button>
+                <div className="room-controls" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 20px',
+                    background: 'rgba(20, 20, 20, 0.7)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    borderRadius: 40,
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                    pointerEvents: 'auto'
+                }}>
+                    <button
+                        onClick={() => {
+                            playSound('click');
+                            const link = `${window.location.origin}/?room=${roomId}`;
+                            navigator.clipboard.writeText(link);
+                            showAlert('Davet', 'Davet linki kopyalandı!');
+                        }}
+                        className="control-btn-main"
+                        title="Davet Et"
+                        style={{ background: 'rgba(255,255,255,0.1)', color: 'white' }}
+                    >
+                        <FaUserPlus />
+                    </button>
 
-                <button
-                    onClick={() => { playSound('click'); setIsMicOn(!isMicOn); }}
-                    className={`control-circle`}
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: isMicOn ? 'var(--bg-primary)' : 'var(--danger)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                >
-                    {isMicOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
-                </button>
+                    <button
+                        onClick={() => { playSound('click'); setIsMicOn(!isMicOn); }}
+                        className="control-btn-main"
+                        title={isMicOn ? "Mikrofonu Kapat" : "Mikrofonu Aç"}
+                        style={{
+                            background: isMicOn ? 'rgba(255,255,255,0.1)' : 'var(--danger)',
+                            color: 'white'
+                        }}
+                    >
+                        {isMicOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
+                    </button>
 
-                <button
-                    onClick={() => { playSound('click'); toggleScreenShare(); }}
-                    className={`control-circle`}
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: screenStream ? 'var(--brand)' : 'var(--bg-primary)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                    title="Ekran Paylaş"
-                >
-                    <FaDesktop />
-                </button>
+                    <button
+                        onClick={() => { playSound('click'); toggleScreenShare(); }}
+                        className="control-btn-main"
+                        title={screenStream ? "Ekran Paylaşımını Durdur" : "Ekran Paylaş"}
+                        style={{
+                            background: screenStream ? 'var(--brand)' : 'rgba(255,255,255,0.1)',
+                            color: 'white'
+                        }}
+                    >
+                        <FaDesktop />
+                    </button>
 
-                <button
-                    onClick={() => { playSound('click'); toggleCamera(); }}
-                    className={`control-circle`}
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: isCameraOn ? 'var(--brand)' : 'var(--bg-primary)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                    title={isCameraOn ? "Kamerayı Kapat" : "Kamerayı Aç"}
-                >
-                    {isCameraOn ? <FaVideo /> : <FaVideoSlash />}
-                </button>
+                    <button
+                        onClick={() => { playSound('click'); toggleCamera(); }}
+                        className="control-btn-main"
+                        title={isCameraOn ? "Kamerayı Kapat" : "Kamerayı Aç"}
+                        style={{
+                            background: isCameraOn ? 'var(--brand)' : 'rgba(255,255,255,0.1)',
+                            color: 'white'
+                        }}
+                    >
+                        {isCameraOn ? <FaVideo /> : <FaVideoSlash />}
+                    </button>
 
-                <button
-                    onClick={() => { playSound('click'); setIsGameMode(!isGameMode); }}
-                    className={`control-circle`}
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: isGameMode ? 'var(--brand)' : 'var(--bg-primary)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                    title="Oyun Modu"
-                >
-                    <FaBolt />
-                </button>
+                    <button
+                        onClick={() => { playSound('click'); setIsGameMode(!isGameMode); }}
+                        className="control-btn-main"
+                        title={isGameMode ? "Oyun Modunu Kapat" : "Oyun Modunu Aç"}
+                        style={{
+                            background: isGameMode ? 'var(--brand)' : 'rgba(255,255,255,0.1)',
+                            color: 'white'
+                        }}
+                    >
+                        <FaGamepad />
+                    </button>
 
-                <button
-                    onClick={async () => {
-                        playSound('click');
-                        const memberRef = doc(db, `rooms/${roomId}/members`, currentUser?.uid || 'anon');
-                        await deleteDoc(memberRef);
-
-                        // Check if room is empty
-                        const membersRef = collection(db, `rooms/${roomId}/members`);
-                        const snap = await getDocs(membersRef);
-                        if (snap.empty) {
-                            await deleteDoc(doc(db, 'rooms', roomId));
-                        }
-
-                        window.location.reload();
-                    }}
-                    className="control-circle"
-                    style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--danger)', color: 'white', fontSize: 13, fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
-                >
-                    ÇIK
-                </button>
+                    <button
+                        onClick={async () => {
+                            playSound('click');
+                            const memberRef = doc(db, `rooms/${roomId}/members`, currentUser?.uid || 'anon');
+                            await deleteDoc(memberRef);
+                            const membersRef = collection(db, `rooms/${roomId}/members`);
+                            const snap = await getDocs(membersRef);
+                            if (snap.empty) {
+                                await deleteDoc(doc(db, 'rooms', roomId));
+                            }
+                            window.location.reload();
+                        }}
+                        className="control-btn-main exit"
+                        title="Ayrıl"
+                        style={{ background: 'var(--danger)', color: 'white' }}
+                    >
+                        <FaSignOutAlt />
+                    </button>
+                </div>
             </div>
         </div>
     );
