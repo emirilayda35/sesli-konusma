@@ -13,9 +13,11 @@ import {
 
 const servers = {
     iceServers: [
-        {
-            urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'],
-        },
+        { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
     ],
     iceCandidatePoolSize: 10,
 };
@@ -302,7 +304,22 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
         try {
             if (type === 'offer') {
-                await pc.setRemoteDescription(description || new RTCSessionDescription({ type: 'offer', sdp }));
+                const offerDescription = description || new RTCSessionDescription({ type: 'offer', sdp });
+
+                if (offerCollision && isPolite) {
+                    try {
+                        await Promise.all([
+                            pc.setLocalDescription({ type: 'rollback' }),
+                            pc.setRemoteDescription(offerDescription)
+                        ]);
+                    } catch (rollbackErr) {
+                        console.warn("Rollback failed, trying standard setRemote", rollbackErr);
+                        await pc.setRemoteDescription(offerDescription);
+                    }
+                } else {
+                    await pc.setRemoteDescription(offerDescription);
+                }
+
                 await pc.setLocalDescription();
                 await addDoc(collection(db, `rooms/${roomId}/signaling`), {
                     type: 'answer',
