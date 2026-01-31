@@ -80,7 +80,36 @@ export const RoomSidebar = ({
 
     useEffect(() => {
         const unsubRooms = onSnapshot(collection(db, 'rooms'), (snapshot) => {
-            const roomList = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+            let roomList = snapshot.docs
+                .map(doc => ({ id: doc.id, ...doc.data() } as any))
+                .filter(room => {
+                    if (!room.participants || room.participants.length === 0) return true;
+                    return room.participants.includes(currentUser?.uid);
+                });
+
+            // Deduplicate rooms: Keep only the latest room for the same set of participants
+            const uniqueRoomMap = new Map();
+            roomList.forEach(room => {
+                if (room.participants && room.participants.length > 0) {
+                    const key = [...room.participants].sort().join('_');
+                    const existing = uniqueRoomMap.get(key);
+                    if (!existing || (room.createdAt?.seconds || 0) > (existing.createdAt?.seconds || 0)) {
+                        uniqueRoomMap.set(key, room);
+                    }
+                } else {
+                    uniqueRoomMap.set(room.id, room);
+                }
+            });
+            roomList = Array.from(uniqueRoomMap.values());
+
+            // Sort rooms: Public/named rooms first, then private calls
+            roomList.sort((a, b) => {
+                const aIsPrivate = a.participants && a.participants.length > 0;
+                const bIsPrivate = b.participants && b.participants.length > 0;
+                if (aIsPrivate === bIsPrivate) return b.createdAt - a.createdAt;
+                return aIsPrivate ? 1 : -1;
+            });
+
             setRooms(roomList);
         });
 
@@ -554,6 +583,31 @@ export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => v
     const handleVoiceCall = async (userId: string) => {
         try {
             const targetUser = friends.find(f => f.uid === userId);
+
+            // Check if a room already exists with these participants
+            const roomsRef = collection(db, 'rooms');
+            const q = query(roomsRef, where('participants', 'array-contains', currentUser?.uid));
+            const snapshot = await getDocs(q);
+
+            let existingRoomId = null;
+
+            for (const doc of snapshot.docs) {
+                const data = doc.data();
+                if (data.participants &&
+                    data.participants.includes(userId) &&
+                    data.participants.length === 2 && // Strictly 2 participants for Direct Call
+                    data.type === 'voice') {
+                    existingRoomId = doc.id;
+                    break;
+                }
+            }
+
+            if (existingRoomId) {
+                showAlert('Bilgi', 'Mevcut sesli odaya yönlendiriliyorsunuz...');
+                window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: existingRoomId } }));
+                return;
+            }
+
             const roomName = `${userData?.displayName} & ${targetUser?.displayName}`;
 
             // Create a new voice room
@@ -578,6 +632,31 @@ export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => v
     const handleVideoCall = async (userId: string) => {
         try {
             const targetUser = friends.find(f => f.uid === userId);
+
+            // Check if a room already exists with these participants
+            const roomsRef = collection(db, 'rooms');
+            const q = query(roomsRef, where('participants', 'array-contains', currentUser?.uid));
+            const snapshot = await getDocs(q);
+
+            let existingRoomId = null;
+
+            for (const doc of snapshot.docs) {
+                const data = doc.data();
+                if (data.participants &&
+                    data.participants.includes(userId) &&
+                    data.participants.length === 2 &&
+                    data.type === 'video') { // Check specifically for video type if needed, or re-use existing room regardless of type?
+                    existingRoomId = doc.id;
+                    break;
+                }
+            }
+
+            if (existingRoomId) {
+                showAlert('Bilgi', 'Mevcut görüntülü odaya yönlendiriliyorsunuz...');
+                window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: existingRoomId } }));
+                return;
+            }
+
             const roomName = `${userData?.displayName} & ${targetUser?.displayName}`;
 
             // Create a new video room
