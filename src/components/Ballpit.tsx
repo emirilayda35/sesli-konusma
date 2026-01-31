@@ -329,7 +329,7 @@ function handlePointerLeave() {
 function handleTouchStart(e: any) {
     // Determine if the user is touching a UI element
     const target = e.target as HTMLElement;
-    const isInteractive = target.closest && target.closest('button, a, input, textarea, select, [role="button"], .sidebar-scrollable, .user-panel, .room-sidebar, .rooms-container, .users-container, .active-room-header, .voice-room, .group-chat, .room-item, .member-item');
+    const isInteractive = target.closest && target.closest('button, a, input, textarea, select, [role="button"], .sidebar-scrollable, .user-panel, .room-sidebar, .rooms-container, .users-container, .active-room-header, .voice-room, .group-chat, .room-item, .member-item, .sidebar-overlay');
 
     if (isInteractive) {
         // Let the event bubble naturally for UI elements
@@ -358,7 +358,7 @@ function handleTouchStart(e: any) {
 
 function handleTouchMove(e: any) {
     const target = e.target as HTMLElement;
-    const isInteractive = target.closest && target.closest('button, a, input, textarea, select, [role="button"], .sidebar-scrollable, .user-panel, .room-sidebar, .rooms-container, .users-container, .active-room-header, .voice-room, .group-chat, .room-item, .member-item');
+    const isInteractive = target.closest && target.closest('button, a, input, textarea, select, [role="button"], .sidebar-scrollable, .user-panel, .room-sidebar, .rooms-container, .users-container, .active-room-header, .voice-room, .group-chat, .room-item, .member-item, .sidebar-overlay');
 
     if (isInteractive) {
         return;
