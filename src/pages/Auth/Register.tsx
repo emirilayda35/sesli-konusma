@@ -1,60 +1,55 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
-import { createUserWithEmailAndPassword, updateProfile, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { initializeApp, getApps } from 'firebase/app';
+import { FaEye, FaEyeSlash, FaDownload } from 'react-icons/fa';
+import { createUserWithEmailAndPassword, updateProfile, getAuth } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '../../contexts/AuthContext';
-import { auth, firebaseConfig } from '../../firebase';
+import { auth, db } from '../../firebase';
+import DownloadModal from '../../components/DownloadModal';
 import '../../styles/auth.css';
 
 export default function Register() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [displayName, setDisplayName] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-    const [username, setUsername] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
     const { switchAccount } = useAuth();
     const navigate = useNavigate();
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        if (password.length < 6) {
-            return setError('Şifre en az 6 karakter olmalıdır.');
-        }
-
         try {
             setError('');
             setLoading(true);
 
-            // 1. Initial register on helper app to get UID
-            const helperAppName = 'auth-helper';
-            const helperApp = getApps().find(a => a.name === helperAppName) || initializeApp(firebaseConfig, helperAppName);
-            const helperAuth = getAuth(helperApp);
-
-            const userCredential = await createUserWithEmailAndPassword(helperAuth, email, password);
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             const user = userCredential.user;
+
             await updateProfile(user, {
-                displayName: username
+                displayName: displayName
             });
-            const uid = user.uid;
 
-            // 2. Persistent login on named app
-            const name = `app-${uid}`;
-            const permanentApp = getApps().find(a => a.name === name) || initializeApp(firebaseConfig, name);
-            const permanentAuth = getAuth(permanentApp);
-            await signInWithEmailAndPassword(permanentAuth, email, password);
+            // Create user document in Firestore
+            await setDoc(doc(db, 'users', user.uid), {
+                uid: user.uid,
+                email: user.email,
+                displayName: displayName,
+                photoURL: null,
+                createdAt: serverTimestamp(),
+                lastActive: serverTimestamp(),
+                isOnline: true,
+                friends: []
+            });
 
-            // 3. Switch account in context
-            await switchAccount(uid);
+            // Auto switch to this new account and save it locally
+            await switchAccount(user.uid);
 
             navigate('/');
         } catch (err: any) {
-            if (err.code === 'auth/email-already-in-use') {
-                setError('Bu e-posta adresi zaten kullanımda.');
-            } else {
-                setError('Hesap oluşturulurken bir hata oluştu.');
-            }
+            setError('Hesap oluşturulamadı. ' + err.message);
             console.error(err);
         } finally {
             setLoading(false);
@@ -63,8 +58,38 @@ export default function Register() {
 
     return (
         <div className="auth-page">
+            <button
+                onClick={() => setIsDownloadModalOpen(true)}
+                style={{
+                    position: 'absolute',
+                    top: '20px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    color: 'white',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    backdropFilter: 'blur(10px)',
+                    padding: '10px 20px',
+                    borderRadius: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    zIndex: 10,
+                    transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.6)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)'}
+            >
+                <FaDownload size={14} /> Uygulamayı İndir
+            </button>
+
+            <DownloadModal isOpen={isDownloadModalOpen} onClose={() => setIsDownloadModalOpen(false)} />
+
             <div className="auth-card">
-                <h2>Hesap oluştur</h2>
+                <h2>Bir hesap oluştur</h2>
 
                 {error && <div className="error-message">{error}</div>}
 
@@ -82,8 +107,8 @@ export default function Register() {
                         <label>KULLANICI ADI</label>
                         <input
                             type="text"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
                             required
                         />
                     </div>
@@ -106,12 +131,12 @@ export default function Register() {
                         </div>
                     </div>
                     <button disabled={loading} className="auth-button" type="submit">
-                        {loading ? 'Hesap oluşturuluyor...' : 'Devam Et'}
+                        {loading ? 'Devam Et' : 'Devam Et'}
                     </button>
                 </form>
 
                 <div className="auth-footer">
-                    Zaten bir hesabın var mı? <Link to="/login">Giriş yap</Link>
+                    Zaten bir hesabın var mı? <Link to="/login">Giriş Yap</Link>
                 </div>
             </div>
         </div>

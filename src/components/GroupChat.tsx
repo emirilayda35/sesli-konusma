@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaPaperPlane, FaMicrophone, FaStop, FaPlay, FaTrash } from 'react-icons/fa';
+import { FaPaperPlane, FaMicrophone, FaStop, FaTrash, FaVolumeUp, FaChevronLeft } from 'react-icons/fa';
 import { useUI } from '../contexts/UIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, where, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, where, deleteDoc, setDoc, updateDoc } from 'firebase/firestore';
 import UserContextMenu from './UserContextMenu';
+import { useSound } from '../contexts/SoundContext';
 import '../styles/contextMenu.css';
 
 interface Message {
@@ -16,7 +17,7 @@ interface Message {
     createdAt: any;
 }
 
-export default function GroupChat({ groupId }: { groupId: string }) {
+export default function GroupChat({ groupId, onBack }: { groupId: string, onBack?: () => void }) {
     const { currentUser, userData } = useAuth();
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState('');
@@ -27,6 +28,10 @@ export default function GroupChat({ groupId }: { groupId: string }) {
     const { showConfirm, showAlert } = useUI();
     const [memberProfiles, setMemberProfiles] = useState<Record<string, { name: string, photoURL: string }>>({});
     const [contextMenu, setContextMenu] = useState<{ user: any; position: { x: number; y: number } } | null>(null);
+    const { playSound } = useSound();
+    const lastMsgIdRef = useRef<string | null>(null);
+
+    const [groupName, setGroupName] = useState('');
 
     useEffect(() => {
         const q = query(
@@ -34,15 +39,25 @@ export default function GroupChat({ groupId }: { groupId: string }) {
             orderBy('createdAt', 'asc')
         );
         const unsub = onSnapshot(q, (snapshot) => {
-            setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+            const newMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+
+            // Notification for new incoming messages
+            if (newMessages.length > 0) {
+                const latest = newMessages[newMessages.length - 1];
+                if (lastMsgIdRef.current && latest.id !== lastMsgIdRef.current && latest.senderId !== currentUser?.uid) {
+                    playSound('notification');
+                }
+                lastMsgIdRef.current = latest.id;
+            }
+
+            setMessages(newMessages);
         });
 
-        // Listen for group member profiles to keep names updated in real-time
         const unsubGroup = onSnapshot(doc(db, 'groups', groupId), (docSnap) => {
             if (docSnap.exists()) {
+                setGroupName(docSnap.data().name);
                 const memberUids = docSnap.data().members || [];
                 if (memberUids.length > 0) {
-                    // Firebase 'in' query supports up to 30 items
                     const qMembers = query(collection(db, 'users'), where('uid', 'in', memberUids.slice(0, 30)));
                     return onSnapshot(qMembers, (snap) => {
                         const profiles: Record<string, { name: string, photoURL: string }> = {};
@@ -63,7 +78,7 @@ export default function GroupChat({ groupId }: { groupId: string }) {
             unsub();
             unsubGroup();
         };
-    }, [groupId]);
+    }, [groupId, currentUser?.uid, playSound]);
 
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -80,6 +95,18 @@ export default function GroupChat({ groupId }: { groupId: string }) {
             type: 'text',
             createdAt: serverTimestamp()
         });
+
+        // Update group document for global notifications
+        await updateDoc(doc(db, 'groups', groupId), {
+            lastMessage: {
+                text: text,
+                senderName: userData?.displayName || 'Anonim',
+                senderId: currentUser.uid,
+                timestamp: serverTimestamp()
+            }
+        });
+
+        playSound('message_sent');
     };
 
     const startRecording = async () => {
@@ -101,12 +128,24 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                     type: 'audio',
                     createdAt: serverTimestamp()
                 });
+
+                // Update group document for global notifications
+                await updateDoc(doc(db, 'groups', groupId), {
+                    lastMessage: {
+                        text: '[Sesli Mesaj]',
+                        senderName: userData?.displayName || 'Anonim',
+                        senderId: currentUser?.uid,
+                        timestamp: serverTimestamp()
+                    }
+                });
+
+                playSound('message_sent');
                 stream.getTracks().forEach(t => t.stop());
             };
 
             recorder.start();
             setIsRecording(true);
-            setTimeout(() => { if (recorder.state === 'recording') stopRecording(); }, 30000); // 30s limit
+            setTimeout(() => { if (recorder.state === 'recording') stopRecording(); }, 30000);
         } catch (err) {
             console.error(err);
         }
@@ -126,6 +165,7 @@ export default function GroupChat({ groupId }: { groupId: string }) {
             async () => {
                 try {
                     await deleteDoc(doc(db, 'groups', groupId, 'messages', messageId));
+                    playSound('click');
                 } catch (err) {
                     console.error("Error deleting message:", err);
                 }
@@ -136,9 +176,9 @@ export default function GroupChat({ groupId }: { groupId: string }) {
     };
 
     const handleAvatarClick = (senderId: string, event: React.MouseEvent) => {
-        if (senderId === currentUser?.uid) return; // Don't show menu for own messages
-
+        if (senderId === currentUser?.uid) return;
         event.stopPropagation();
+        playSound('click');
         const rect = (event.target as HTMLElement).getBoundingClientRect();
         const profile = memberProfiles[senderId];
 
@@ -161,7 +201,6 @@ export default function GroupChat({ groupId }: { groupId: string }) {
         try {
             const profile = memberProfiles[userId];
             const roomName = `${userData?.displayName} & ${profile?.name || 'Unknown'}`;
-
             const roomRef = await addDoc(collection(db, 'rooms'), {
                 name: roomName,
                 type: 'voice',
@@ -169,9 +208,7 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                 createdBy: currentUser?.uid,
                 createdAt: serverTimestamp()
             });
-
-            // Removed blocking alert to prevent grey screen overlay
-
+            playSound('call_start');
             window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
         } catch (error) {
             console.error('Voice call error:', error);
@@ -183,7 +220,6 @@ export default function GroupChat({ groupId }: { groupId: string }) {
         try {
             const profile = memberProfiles[userId];
             const roomName = `${userData?.displayName} & ${profile?.name || 'Unknown'}`;
-
             const roomRef = await addDoc(collection(db, 'rooms'), {
                 name: roomName,
                 type: 'video',
@@ -191,9 +227,7 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                 createdBy: currentUser?.uid,
                 createdAt: serverTimestamp()
             });
-
-            // Removed blocking alert to prevent grey screen overlay
-
+            playSound('call_start');
             window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
         } catch (error) {
             console.error('Video call error:', error);
@@ -207,10 +241,30 @@ export default function GroupChat({ groupId }: { groupId: string }) {
             'Bu kullanıcıyı engellemek istediğinizden emin misiniz?',
             async () => {
                 showAlert('Engellendi', 'Kullanıcı başarıyla engellendi.');
+                playSound('click');
             },
             'Engelle',
             true
         );
+    };
+
+    const handleJoinVoice = async () => {
+        playSound('click');
+        const voiceRoomId = `group_voice_${groupId}`;
+        try {
+            const roomRef = doc(db, 'rooms', voiceRoomId);
+            await setDoc(roomRef, {
+                name: `${groupName} (Sesli Kanal)`,
+                type: 'voice',
+                groupId: groupId,
+                isGroupRoom: true,
+                createdAt: serverTimestamp()
+            }, { merge: true });
+
+            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: voiceRoomId } }));
+        } catch (err) {
+            console.error('Error joining group voice:', err);
+        }
     };
 
     const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -222,7 +276,24 @@ export default function GroupChat({ groupId }: { groupId: string }) {
     };
 
     return (
-        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-primary)' }}>
+        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'transparent' }}>
+            <div className="chat-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    {onBack && (
+                        <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0 }}>
+                            <FaChevronLeft />
+                            <span>Geri</span>
+                        </button>
+                    )}
+                </div>
+                <button
+                    onClick={handleJoinVoice}
+                    className="btn-primary"
+                    style={{ padding: '6px 15px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                    <FaVolumeUp /> SESLİ KANAL
+                </button>
+            </div>
             <div className="messages-list" style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {messages.map(msg => {
                     const profile = memberProfiles[msg.senderId];
@@ -242,9 +313,9 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                                 style={{ cursor: isOwn ? 'default' : 'pointer' }}
                             >
                                 {profile?.photoURL ? (
-                                    <img src={profile.photoURL} alt="" className="message-avatar" />
+                                    <img src={profile.photoURL} alt="" className="message-avatar avatar" />
                                 ) : (
-                                    <div className="message-avatar-placeholder">
+                                    <div className="message-avatar-placeholder avatar">
                                         {(profile?.name || msg.senderName || '?')[0].toUpperCase()}
                                     </div>
                                 )}
@@ -301,11 +372,19 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                     placeholder="Bir mesaj yaz..."
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendText()}
+                    onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                            playSound('click');
+                            handleSendText();
+                        }
+                    }}
                 />
 
                 <button
-                    onClick={isRecording ? stopRecording : startRecording}
+                    onClick={() => {
+                        playSound('click');
+                        isRecording ? stopRecording() : startRecording();
+                    }}
                     style={{
                         width: '40px', height: '40px', borderRadius: '50%', border: 'none',
                         background: isRecording ? 'var(--danger)' : 'var(--bg-accent)', color: 'white', cursor: 'pointer',
@@ -316,7 +395,10 @@ export default function GroupChat({ groupId }: { groupId: string }) {
                 </button>
 
                 <button
-                    onClick={handleSendText}
+                    onClick={() => {
+                        playSound('click');
+                        handleSendText();
+                    }}
                     style={{
                         width: '40px', height: '40px', borderRadius: '8px', border: 'none',
                         background: 'var(--brand)', color: 'white', cursor: 'pointer',

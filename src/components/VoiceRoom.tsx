@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash, FaChevronLeft } from 'react-icons/fa';
 import { useUI } from '../contexts/UIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
+import { useSound } from '../contexts/SoundContext';
 import { collection, onSnapshot, doc, deleteDoc, getDocs } from 'firebase/firestore';
 
 interface VoiceRoomProps {
     roomId: string;
+    onBack?: () => void;
 }
 
-export default function VoiceRoom({ roomId }: VoiceRoomProps) {
+export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
     const { currentUser, userData, db } = useAuth();
     const { showAlert } = useUI();
     const [isMicOn, setIsMicOn] = useState(true);
@@ -17,6 +19,11 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
     const [isGameMode, setIsGameMode] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [sensitivity, setSensitivity] = useState(parseInt(localStorage.getItem('voice_sensitivity') || '10'));
+    const { playSound } = useSound();
+
+    useEffect(() => {
+        playSound('join');
+    }, []);
 
     const { peers, peerNames, localStream, screenStream, toggleScreenShare, isCameraOn, toggleCamera } = useWebRTC(
         roomId,
@@ -126,8 +133,16 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
     }, []);
 
     return (
-        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16, padding: 20 }}>
+        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+            <div className="voice-header" style={{ justifyContent: 'flex-start' }}>
+                {onBack && (
+                    <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0 }}>
+                        <FaChevronLeft />
+                        <span>Geri</span>
+                    </button>
+                )}
+            </div>
+            <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 450px))', gap: 16, padding: 20, justifyContent: 'center', alignContent: 'center' }}>
 
                 {/* Local User Card */}
                 <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
@@ -139,7 +154,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                             playsInline
                             style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                         />
-                    ) : (isCameraOn && localStream) ? (
+                    ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
                         <video
                             ref={(el) => { if (el) el.srcObject = localStream; }}
                             autoPlay
@@ -148,7 +163,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                             style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
                         />
                     ) : userData?.photoURL ? (
-                        <img src={userData.photoURL} alt="" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
+                        <img src={userData.photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
                     ) : (
                         <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
                             {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
@@ -161,12 +176,12 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </div>
 
                 {/* Remote Participants */}
-                {Array.from(peers.entries()).map(([peerId, stream]) => (
+                {Array.from(peerNames.entries()).map(([peerId, name]) => (
                     <RemoteParticipant
                         key={peerId}
                         peerId={peerId}
-                        stream={stream}
-                        name={peerNames.get(peerId) || 'Yükleniyor...'}
+                        stream={peers.get(peerId)}
+                        name={name}
                         isGameMode={isGameMode}
                         globalSensitivity={sensitivity}
                         isDeafened={isDeafened}
@@ -178,6 +193,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
             <div className="room-controls" style={{ height: 80, background: 'var(--bg-tertiary)', borderRadius: '12px 12px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
                 <button
                     onClick={() => {
+                        playSound('click');
                         const link = `${window.location.origin}/?room=${roomId}`;
                         navigator.clipboard.writeText(link);
                         showAlert('Davet', 'Davet linki kopyalandı!');
@@ -189,7 +205,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
-                    onClick={() => setIsMicOn(!isMicOn)}
+                    onClick={() => { playSound('click'); setIsMicOn(!isMicOn); }}
                     className={`control-circle`}
                     style={{ width: 48, height: 48, borderRadius: '50%', background: isMicOn ? 'var(--bg-accent)' : 'var(--danger)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
                 >
@@ -197,7 +213,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
-                    onClick={toggleScreenShare}
+                    onClick={() => { playSound('click'); toggleScreenShare(); }}
                     className={`control-circle`}
                     style={{ width: 48, height: 48, borderRadius: '50%', background: screenStream ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
                     title="Ekran Paylaş"
@@ -206,7 +222,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
-                    onClick={toggleCamera}
+                    onClick={() => { playSound('click'); toggleCamera(); }}
                     className={`control-circle`}
                     style={{ width: 48, height: 48, borderRadius: '50%', background: isCameraOn ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
                     title={isCameraOn ? "Kamerayı Kapat" : "Kamerayı Aç"}
@@ -215,7 +231,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
                 </button>
 
                 <button
-                    onClick={() => setIsGameMode(!isGameMode)}
+                    onClick={() => { playSound('click'); setIsGameMode(!isGameMode); }}
                     className={`control-circle`}
                     style={{ width: 48, height: 48, borderRadius: '50%', background: isGameMode ? 'var(--brand)' : 'var(--bg-accent)', color: 'white', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}
                     title="Oyun Modu"
@@ -225,6 +241,7 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
 
                 <button
                     onClick={async () => {
+                        playSound('click');
                         const memberRef = doc(db, `rooms/${roomId}/members`, currentUser?.uid || 'anon');
                         await deleteDoc(memberRef);
 
@@ -247,7 +264,17 @@ export default function VoiceRoom({ roomId }: VoiceRoomProps) {
     );
 }
 
-function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity, isDeafened, db }: { peerId: string, stream: MediaStream, name: string, isGameMode: boolean, globalSensitivity: number, isDeafened: boolean, db: any }) {
+interface RemoteParticipantProps {
+    peerId: string;
+    stream: MediaStream | undefined;
+    name: string;
+    isGameMode: boolean;
+    globalSensitivity: number;
+    isDeafened: boolean;
+    db: any;
+}
+
+function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity, isDeafened, db }: RemoteParticipantProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -287,24 +314,29 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
             }
         });
 
-        if (audioRef.current && stream) {
-            audioRef.current.srcObject = stream;
-        }
-        if (videoRef.current && stream) {
-            videoRef.current.srcObject = stream;
-        }
+        if (stream) {
+            if (audioRef.current) audioRef.current.srcObject = stream;
+            if (videoRef.current) videoRef.current.srcObject = stream;
 
-        const checkTracks = () => {
-            setHasVideo(stream.getVideoTracks().length > 0);
-        };
-        checkTracks();
-        stream.onaddtrack = checkTracks;
-        stream.onremovetrack = checkTracks;
+            const checkTracks = () => {
+                setHasVideo(stream.getVideoTracks().length > 0);
+            };
+            checkTracks();
+            stream.onaddtrack = checkTracks;
+            stream.onremovetrack = checkTracks;
+        } else {
+            setHasVideo(false);
+        }
 
         return () => unsub();
     }, [peerId, stream]);
 
     useEffect(() => {
+        if (!stream || stream.getAudioTracks().length === 0) {
+            setIsSpeaking(false);
+            return;
+        }
+
         const audioContext = new AudioContext();
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
@@ -313,6 +345,10 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         let interval = setInterval(() => {
+            if (stream.getAudioTracks().length === 0) {
+                setIsSpeaking(false);
+                return;
+            }
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
             const threshold = (100 - globalSensitivity) / 2;
@@ -331,7 +367,7 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
             {hasVideo ? (
                 <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
             ) : photoURL ? (
-                <img src={photoURL} alt="" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
+                <img src={photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (
                 <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>{displayName.charAt(0)}</div>
             )}

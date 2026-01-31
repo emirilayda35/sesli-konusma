@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import { FaEye, FaEyeSlash, FaDownload } from 'react-icons/fa';
 import { signInWithEmailAndPassword, getAuth } from 'firebase/auth';
 import { initializeApp, getApps } from 'firebase/app';
 import { useAuth } from '../../contexts/AuthContext';
 import { auth, firebaseConfig } from '../../firebase';
+import DownloadModal from '../../components/DownloadModal';
 import '../../styles/auth.css';
 
 export default function Login() {
@@ -13,6 +14,7 @@ export default function Login() {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
     const { switchAccount } = useAuth();
     const navigate = useNavigate();
 
@@ -50,6 +52,36 @@ export default function Login() {
 
     return (
         <div className="auth-page">
+            <button
+                onClick={() => setIsDownloadModalOpen(true)}
+                style={{
+                    position: 'absolute',
+                    top: '20px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    color: 'white',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    backdropFilter: 'blur(10px)',
+                    padding: '10px 20px',
+                    borderRadius: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    zIndex: 10,
+                    transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.6)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)'}
+            >
+                <FaDownload size={14} /> Uygulamayı İndir
+            </button>
+
+            <DownloadModal isOpen={isDownloadModalOpen} onClose={() => setIsDownloadModalOpen(false)} />
+
             <div className="auth-card">
                 <h2>Tekrar hoş geldin!</h2>
                 <p>Seni yeniden görmek çok güzel!</p>

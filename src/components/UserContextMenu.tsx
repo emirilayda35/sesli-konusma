@@ -1,6 +1,8 @@
 import React, { useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { FaComment, FaMicrophone, FaVideo, FaBan, FaTimes } from 'react-icons/fa';
 import { useClickOutside } from '../hooks/useClickOutside';
+import { useSound } from '../contexts/SoundContext';
 import '../styles/contextMenu.css';
 
 interface UserContextMenuProps {
@@ -28,6 +30,7 @@ export default function UserContextMenu({
     onBlockUser
 }: UserContextMenuProps) {
     const menuRef = useRef<HTMLDivElement>(null);
+    const { playSound } = useSound();
 
     useClickOutside(menuRef, onClose);
 
@@ -60,6 +63,7 @@ export default function UserContextMenu({
             icon: <FaComment />,
             label: 'Mesaj Gönder',
             onClick: () => {
+                playSound('click');
                 onSendMessage(user.uid);
                 onClose();
             },
@@ -69,6 +73,7 @@ export default function UserContextMenu({
             icon: <FaMicrophone />,
             label: 'Sesli Arama',
             onClick: () => {
+                playSound('call_start');
                 onVoiceCall(user.uid);
                 onClose();
             },
@@ -78,6 +83,7 @@ export default function UserContextMenu({
             icon: <FaVideo />,
             label: 'Görüntülü Arama',
             onClick: () => {
+                playSound('call_start');
                 onVideoCall(user.uid);
                 onClose();
             },
@@ -87,6 +93,7 @@ export default function UserContextMenu({
             icon: <FaBan />,
             label: 'Kullanıcıyı Engelle',
             onClick: () => {
+                playSound('click');
                 onBlockUser(user.uid);
                 onClose();
             },
@@ -95,7 +102,7 @@ export default function UserContextMenu({
         }
     ];
 
-    return (
+    return ReactDOM.createPortal(
         <div className="user-context-menu" ref={menuRef}>
             <div className="context-menu-header">
                 <div className="context-menu-user-info">
@@ -131,6 +138,7 @@ export default function UserContextMenu({
                     </button>
                 ))}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

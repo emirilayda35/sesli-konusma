@@ -1,0 +1,12 @@
+/src/main/java/com/seslikonusma/app/generated
+/src/main/jniLibs/**/*.so
+/src/main/assets/tauri.conf.json
+/tauri.build.gradle.kts
+/proguard-tauri.pro
+/tauri.properties
+
+/src-tauri/target/
+/public/downloads/
+*.exe
+*.apk
+node_modules/

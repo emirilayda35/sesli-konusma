@@ -14,35 +14,22 @@ import {
     setDoc,
     deleteDoc,
     serverTimestamp,
-    arrayUnion
+    arrayUnion,
+    arrayRemove
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FaMicrophone, FaMicrophoneSlash, FaHeadphones, FaVolumeMute, FaCog, FaVolumeUp, FaPlus, FaCheck, FaTimes, FaUserPlus, FaSearch, FaSignOutAlt, FaUserFriends, FaUserCircle } from 'react-icons/fa';
 import '../styles/layout.css';
 import { useClickOutside } from '../hooks/useClickOutside';
 import UserContextMenu from './UserContextMenu';
+import { useSound } from '../contexts/SoundContext';
 
-export const ServerSidebar = () => {
-    const { showAlert } = useUI();
-    return (
-        <aside className="server-sidebar">
-            <div className="server-icon active" title="Giriş">VC</div>
-            <div style={{ width: 32, height: 2, background: 'var(--bg-accent)', margin: '4px 0' }} />
-            <div
-                className="server-icon"
-                onClick={() => showAlert('Sunucu', 'Sunucu ekleme özelliği çok yakında! Şimdilik mevcut sunucuyu kullanabilirsiniz.')}
-                style={{ cursor: 'pointer' }}
-                title="Sunucu Ekle"
-            >
-                <FaPlus />
-            </div>
-        </aside>
-    );
-};
+
 
 import SettingsModal from './SettingsModal';
 import CreateGroupModal from './CreateGroupModal';
 import AddAccountModal from './AddAccountModal';
+import GradientText from './GradientText';
 
 export const RoomSidebar = ({
     activeRoom,
@@ -56,6 +43,7 @@ export const RoomSidebar = ({
     onGroupSelect: (id: string | null) => void
 }) => {
     const { currentUser, userData } = useAuth();
+    const { showConfirm } = useUI();
     const [rooms, setRooms] = useState<{ id: string, name: string }[]>([]);
     const [groups, setGroups] = useState<{ id: string, name: string }[]>([]);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -65,6 +53,7 @@ export const RoomSidebar = ({
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
     const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
     const accountMenuRef = useRef<HTMLDivElement>(null);
+    const { playSound } = useSound();
 
     useClickOutside(accountMenuRef, () => {
         if (isAccountMenuOpen) setIsAccountMenuOpen(false);
@@ -98,7 +87,11 @@ export const RoomSidebar = ({
         if (!currentUser) return;
         const qGroups = query(collection(db, 'groups'), where('members', 'array-contains', currentUser.uid));
         const unsubGroups = onSnapshot(qGroups, (snapshot) => {
-            const groupList = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+            const groupList = snapshot.docs.map(doc => ({
+                id: doc.id,
+                name: doc.data().name,
+                owner: doc.data().owner
+            }));
             setGroups(groupList);
         });
 
@@ -108,10 +101,68 @@ export const RoomSidebar = ({
         };
     }, [currentUser]);
 
+    const leaveGroup = async (groupId: string) => {
+        showConfirm(
+            'Gruptan Ayrıl',
+            'Bu gruptan ayrılmak istediğinize emin misiniz?',
+            async () => {
+                try {
+                    const groupRef = doc(db, 'groups', groupId);
+                    await updateDoc(groupRef, {
+                        members: arrayRemove(currentUser?.uid)
+                    });
+                    if (activeGroup === groupId) onGroupSelect(null);
+                } catch (err) {
+                    console.error('Error leaving group:', err);
+                }
+            },
+            'Ayrıl',
+            true
+        );
+    };
+
+    const deleteGroup = async (groupId: string) => {
+        showConfirm(
+            'Grubu Sil',
+            'Bu grubu silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve tüm mesajlar silinecektir.',
+            async () => {
+                try {
+                    await deleteDoc(doc(db, 'groups', groupId));
+                    if (activeGroup === groupId) onGroupSelect(null);
+                } catch (err) {
+                    console.error('Error deleting group:', err);
+                }
+            },
+            'Sil',
+            true
+        );
+    };
+
     const createRoom = async () => {
         const name = prompt('Oda ismi girin:');
         if (name) {
             await addDoc(collection(db, 'rooms'), { name, createdAt: Date.now() });
+        }
+    };
+
+    const joinGroupVoice = async (groupId: string, groupName: string) => {
+        playSound('click');
+        const voiceRoomId = `group_voice_${groupId}`;
+
+        try {
+            const roomRef = doc(db, 'rooms', voiceRoomId);
+            await setDoc(roomRef, {
+                name: `${groupName} (Sesli Kanal)`,
+                type: 'voice',
+                groupId: groupId,
+                isGroupRoom: true,
+                createdAt: serverTimestamp()
+            }, { merge: true });
+
+            onRoomSelect(voiceRoomId);
+            onGroupSelect(null);
+        } catch (err) {
+            console.error('Error joining group voice:', err);
         }
     };
 
@@ -129,13 +180,17 @@ export const RoomSidebar = ({
             </header>
             <div className="sidebar-scrollable">
                 <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    SESLİ KANALLAR <span onClick={createRoom} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
+                    <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
+                        SESLİ KANALLAR
+                    </GradientText>
+                    <span onClick={createRoom} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
                 </div>
                 {rooms.map(room => (
                     <div
                         key={room.id}
                         className={`room-item ${activeRoom === room.id ? 'active' : ''}`}
                         onClick={() => {
+                            playSound('click');
                             onRoomSelect(room.id);
                             onGroupSelect(null);
                         }}
@@ -145,18 +200,59 @@ export const RoomSidebar = ({
                 ))}
 
                 <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
-                    MESAJ GRUPLARI <span onClick={() => setIsCreateGroupOpen(true)} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
+                    <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
+                        MESAJ GRUPLARI
+                    </GradientText>
+                    <span onClick={() => setIsCreateGroupOpen(true)} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
                 </div>
                 {groups.map(group => (
                     <div
                         key={group.id}
                         className={`room-item ${activeGroup === group.id ? 'active' : ''}`}
                         onClick={() => {
+                            playSound('click');
                             onGroupSelect(group.id);
                             onRoomSelect(null);
                         }}
                     >
-                        <FaPlus size={12} style={{ color: 'var(--text-muted)', marginRight: '4px' }} /> {group.name}
+                        <FaPlus size={10} style={{ color: 'var(--text-muted)', marginRight: '4px' }} />
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
+
+                        <button
+                            className="group-action-btn"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                joinGroupVoice(group.id, group.name);
+                            }}
+                            title="Ses Kanalına Katıl"
+                            style={{ marginRight: '4px', color: 'var(--brand)' }}
+                        >
+                            <FaVolumeUp size={12} />
+                        </button>
+
+                        {(group as any).owner === currentUser?.uid ? (
+                            <button
+                                className="group-action-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteGroup(group.id);
+                                }}
+                                title="Grubu Sil"
+                            >
+                                <FaTimes size={12} />
+                            </button>
+                        ) : (
+                            <button
+                                className="group-action-btn"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    leaveGroup(group.id);
+                                }}
+                                title="Gruptan Ayrıl"
+                            >
+                                <FaSignOutAlt size={12} />
+                            </button>
+                        )}
                     </div>
                 ))}
             </div>
@@ -181,7 +277,10 @@ export const RoomSidebar = ({
                         <button
                             className="control-btn"
                             title="Hesap Değiştir"
-                            onClick={() => setIsAccountMenuOpen(!isAccountMenuOpen)}
+                            onClick={() => {
+                                playSound('click');
+                                setIsAccountMenuOpen(!isAccountMenuOpen);
+                            }}
                         >
                             <FaUserFriends />
                         </button>
@@ -195,6 +294,7 @@ export const RoomSidebar = ({
                                             key={acc.uid}
                                             className={`account-item ${acc.uid === currentUser?.uid ? 'active' : ''}`}
                                             onClick={() => {
+                                                playSound('click');
                                                 if (acc.uid !== currentUser?.uid) switchAccount(acc.uid);
                                                 setIsAccountMenuOpen(false);
                                             }}
@@ -228,7 +328,10 @@ export const RoomSidebar = ({
                     <button
                         className={`control-btn ${isMicMuted ? 'muted' : ''}`}
                         title={isMicMuted ? "Sesi Aç" : "Sesi Kapat"}
-                        onClick={toggleMic}
+                        onClick={() => {
+                            playSound('click');
+                            toggleMic();
+                        }}
                         style={{ color: isMicMuted ? 'var(--danger)' : 'var(--text-normal)' }}
                     >
                         {isMicMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
@@ -236,13 +339,31 @@ export const RoomSidebar = ({
                     <button
                         className={`control-btn ${isDeafened ? 'deafened' : ''}`}
                         title={isDeafened ? "Sağırlaştırmayı Kapat" : "Sağırlaştır"}
-                        onClick={toggleDeafen}
+                        onClick={() => {
+                            playSound('click');
+                            toggleDeafen();
+                        }}
                         style={{ color: isDeafened ? 'var(--danger)' : 'var(--text-normal)' }}
                     >
                         {isDeafened ? <FaVolumeMute /> : <FaHeadphones />}
                     </button>
-                    <button className="control-btn" title="Ayarlar" onClick={() => { setInitialTab('voice'); setIsSettingsOpen(true); }}><FaCog /></button>
-                    <button className="control-btn" title="Çıkış Yap" onClick={logoutCurrent} style={{ color: 'var(--danger)' }}><FaSignOutAlt /></button>
+                    <button className="control-btn" title="Ayarlar" onClick={() => { playSound('click'); setInitialTab('voice'); setIsSettingsOpen(true); }}><FaCog /></button>
+                    <button
+                        className="control-btn"
+                        title="Çıkış Yap"
+                        onClick={() => {
+                            showConfirm(
+                                'Çıkış Yap',
+                                'Hesabınızdan çıkış yapmak istediğinize emin misiniz?',
+                                () => logoutCurrent(),
+                                'Çıkış Yap',
+                                true
+                            );
+                        }}
+                        style={{ color: 'var(--danger)' }}
+                    >
+                        <FaSignOutAlt />
+                    </button>
                 </div>
             </footer>
 
@@ -259,8 +380,9 @@ export const RoomSidebar = ({
 
 
 
-export const UserPanel = () => {
+export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => void }) => {
     const { currentUser, userData, db } = useAuth();
+    const { playSound } = useSound();
     const [friendRequests, setFriendRequests] = useState<any[]>([]);
     const [friends, setFriends] = useState<any[]>([]);
     const [contextMenu, setContextMenu] = useState<{ user: any; position: { x: number; y: number } } | null>(null);
@@ -365,6 +487,7 @@ export const UserPanel = () => {
             });
 
             showAlert('Başarılı', 'İstek gönderildi!');
+            playSound('notification');
             setSearchQuery('');
         } catch (err) {
             console.error(err);
@@ -382,8 +505,10 @@ export const UserPanel = () => {
             await updateDoc(toRef, { friends: arrayUnion(fromUid) });
 
             await deleteDoc(doc(db, 'friendRequests', requestId));
+            playSound('join');
         } else {
             await deleteDoc(doc(db, 'friendRequests', requestId));
+            playSound('click');
         }
     };
 
@@ -402,7 +527,7 @@ export const UserPanel = () => {
         const q = query(groupsRef, where('members', 'array-contains', currentUser?.uid));
         const snapshot = await getDocs(q);
 
-        let existingGroup = null;
+        let existingGroup: any = null;
         snapshot.forEach(docSnap => {
             const data = docSnap.data();
             if (data.members.length === 2 && data.members.includes(userId)) {
@@ -411,14 +536,17 @@ export const UserPanel = () => {
         });
 
         if (existingGroup) {
-            showAlert('Mesaj', 'Mevcut sohbete yönlendiriliyorsunuz...');
+            if (onGroupSelect) onGroupSelect(existingGroup.id);
+            // Alert is optional now, maybe remove it for smoother UX?
+            // showAlert('Mesaj', 'Mevcut sohbete yönlendiriliyorsunuz...');
         } else {
             const targetUser = friends.find(f => f.uid === userId);
-            await addDoc(groupsRef, {
+            const ref = await addDoc(groupsRef, {
                 name: `${userData?.displayName} & ${targetUser?.displayName}`,
                 members: [currentUser?.uid, userId],
                 createdAt: serverTimestamp()
             });
+            if (onGroupSelect) onGroupSelect(ref.id);
             showAlert('Mesaj', 'Yeni sohbet oluşturuldu!');
         }
     };
@@ -514,7 +642,11 @@ export const UserPanel = () => {
 
             {friendRequests.length > 0 && (
                 <div className="section">
-                    <div className="member-header">İSTEKLER — {friendRequests.length}</div>
+                    <div className="member-header">
+                        <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
+                            İSTEKLER — {friendRequests.length}
+                        </GradientText>
+                    </div>
                     {friendRequests.map(req => (
                         <div key={req.id} className="member-item">
                             <div className="user-display-name">{req.fromName}</div>
@@ -528,7 +660,11 @@ export const UserPanel = () => {
             )}
 
             <div className="section">
-                <div className="member-header">ARKADAŞLAR — {friends.length}</div>
+                <div className="member-header">
+                    <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
+                        ARKADAŞLAR — {friends.length}
+                    </GradientText>
+                </div>
                 {friends.map(friend => (
                     <div
                         key={friend.uid}

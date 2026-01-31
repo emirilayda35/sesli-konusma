@@ -25,3 +25,23 @@ dist-ssr
 
 .vercel
 .env
+# Node
+node_modules/
+
+# Tauri / Rust
+src-tauri/target/
+**/*.rlib
+**/*.a
+**/*.lib
+
+# Android / build outputs
+*.apk
+*.aab
+*.exe
+
+# Env
+.env
+.env.*
+
+# OS
+.DS_Store

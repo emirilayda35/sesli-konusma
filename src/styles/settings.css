@@ -75,7 +75,7 @@
 
 .settings-header h2 {
     color: var(--text-header);
-    margin-bottom: 20px;
+    margin: 0;
 }
 
 .settings-section {
@@ -367,6 +367,7 @@
     cursor: pointer;
     background: transparent;
     border: none;
+    transition: all 0.2s ease;
 }
 
 .btn-primary {
@@ -378,6 +379,7 @@
     font-weight: 600;
     cursor: pointer;
     border: none;
+    transition: all 0.2s ease;
 }
 
 .cropper-slider {

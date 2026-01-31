@@ -18,6 +18,10 @@
   --font-primary: 'Inter', sans-serif;
   --bg-footer: #232428;
   --bg-overlay: rgba(0, 0, 0, 0.85);
+  --bg-gradient-primary: linear-gradient(135deg, #36393f 0%, #2b2d31 100%);
+  --bg-gradient-secondary: linear-gradient(180deg, #2f3136 0%, #232428 100%);
+  --bg-glass: rgba(32, 34, 37, 0.15);
+  --glass-border: rgba(255, 255, 255, 0.05);
 }
 
 [data-theme='light'] {
@@ -43,7 +47,7 @@
 
 body {
   font-family: var(--font-primary);
-  background-color: var(--bg-primary);
+  background: var(--bg-gradient-primary);
   color: var(--text-normal);
   line-height: 1.5;
   user-select: none;
@@ -61,6 +65,12 @@ button {
   cursor: pointer;
   border: none;
   background: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+}
+
+button:active {
+  transform: scale(0.95);
 }
 
 ::-webkit-scrollbar {
@@ -98,12 +108,6 @@ button {
   flex-direction: column;
 }
 
-.room-sidebar {
-  width: 240px;
-  background-color: var(--bg-secondary);
-  display: flex;
-  flex-direction: column;
-}
 
 /* Speaking Animation */
 /* Speaking Animation - Discord Style */

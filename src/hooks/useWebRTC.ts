@@ -25,7 +25,10 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const [peerNames, setPeerNames] = useState<Map<string, string>>(new Map());
     const [isCameraOn, setIsCameraOn] = useState(false);
     const localStream = useRef<MediaStream | null>(null);
+    const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
     const pcRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+    const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+    const [mountedAt] = useState(Date.now());
 
     useEffect(() => {
         async function setupStream() {
@@ -63,6 +66,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     } : false
                 });
                 localStream.current = stream;
+                setActiveStream(stream);
 
                 // Update tracks in all active peer connections
                 pcRef.current.forEach(pc => {
@@ -154,7 +158,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         if (remoteUserId !== userId) {
                             setPeerNames(prev => new Map(prev).set(remoteUserId, data.name));
                             if (change.type === 'added') {
-                                createPeerConnection(remoteUserId, true);
+                                createPeerConnection(remoteUserId);
                             }
                         }
                     }
@@ -174,12 +178,8 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 snapshot.docChanges().forEach(async (change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        if (data.targetId === userId) {
-                            if (data.type === 'offer') {
-                                await handleOffer(data.senderId, data.sdp);
-                            } else if (data.type === 'answer') {
-                                await handleAnswer(data.senderId, data.sdp);
-                            }
+                        if (data.targetId === userId && data.createdAt > mountedAt) {
+                            await handleSignaling(data);
                         }
                     }
                 });
@@ -190,15 +190,8 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 snapshot.docChanges().forEach(async (change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
-                        if (data.targetId === userId) {
-                            const pc = pcRef.current.get(data.senderId);
-                            if (pc) {
-                                try {
-                                    await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-                                } catch (e) {
-                                    console.error('Error adding ice candidate', e);
-                                }
-                            }
+                        if (data.targetId === userId && data.createdAt > mountedAt) {
+                            await handleIce(data.senderId, data.candidate);
                         }
                     }
                 });
@@ -216,11 +209,17 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         };
     }, [roomId, userId, userName, db]);
 
-    async function createPeerConnection(remoteUserId: string, isOffer: boolean) {
+    async function createPeerConnection(remoteUserId: string) {
         if (pcRef.current.has(remoteUserId)) return;
 
         const pc = new RTCPeerConnection(servers);
         pcRef.current.set(remoteUserId, pc);
+        makingOfferRef.current.set(remoteUserId, false);
+
+        // Polite/Impolite logic to handle glare (signaling collision)
+        // The peer with the "higher" ID is polite and will wait.
+        const isPolite = userId > remoteUserId;
+        let ignoreOffer = false;
 
         if (localStream.current) {
             localStream.current.getTracks().forEach(track => {
@@ -231,7 +230,17 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         pc.ontrack = (event) => {
             setPeers(prev => {
                 const next = new Map(prev);
-                next.set(remoteUserId, event.streams[0]);
+                const existingStream = next.get(remoteUserId);
+                const remoteStream = existingStream || new MediaStream();
+
+                event.streams[0].getTracks().forEach(track => {
+                    if (!remoteStream.getTracks().find(t => t.id === track.id)) {
+                        remoteStream.addTrack(track);
+                    }
+                });
+
+                // Set a new stream reference to trigger React re-render
+                next.set(remoteUserId, new MediaStream(remoteStream.getTracks()));
                 return next;
             });
         };
@@ -247,79 +256,86 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             }
         };
 
-        // Automatic Negotiation Handling
         pc.onnegotiationneeded = async () => {
             try {
-                // If we are unstable, we might need to wait or handle glare, 
-                // but for simple cases, just processing it usually works if roles are clear.
-                // To minimize glare, only the 'polite' peer (or initially the caller) should offer?
-                // Or simply: just Offer.
-
-                // For this implementation, we allow renegotiation.
-                // However, infinite loops can happen if not careful.
-                const offer = await pc.createOffer();
-                if (pc.signalingState !== 'stable') return; // Prevent collision if already negotiating
-
-                await pc.setLocalDescription(offer);
+                makingOfferRef.current.set(remoteUserId, true);
+                await pc.setLocalDescription();
                 await addDoc(collection(db, `rooms/${roomId}/signaling`), {
                     type: 'offer',
                     senderId: userId,
                     targetId: remoteUserId,
-                    sdp: offer.sdp,
+                    description: pc.localDescription?.toJSON(),
                     createdAt: Date.now()
                 });
             } catch (err) {
                 console.error("Negotiation error:", err);
+            } finally {
+                makingOfferRef.current.set(remoteUserId, false);
             }
         };
 
-        // We still trigger initial offer manually if we are the "caller" (isOffer=true)
-        // just to be 100% sure the process starts immediately,
-        // although onnegotiationneeded would fire after addTrack anyway.
-        // But if there are no tracks initially (mic blocked), we still want to connect.
-        if (isOffer) {
-            // We can rely on onnegotiationneeded mostly, but let's just createDataChannel/offer manually
-            // to ensure signaling happens.
-            // Actually, to avoid double offer, let's verify if negotiation triggered?
-            // Safer: Just call it. If signalingState becomes 'have-local-offer' quickly, the event handler will abort.
-            try {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
+        // We use a separate listener for signaling within this closure to manage state easier,
+        // but since we already have a global listener, we need to ensure they don't fight.
+        // Actually, the global listener is better for centralized management.
+        // Let's stick to the global listener but update it to handle the new logic.
+    }
+
+    async function handleSignaling(data: any) {
+        const { senderId, type, description, sdp } = data;
+        let pc = pcRef.current.get(senderId);
+
+        if (!pc) {
+            await createPeerConnection(senderId);
+            pc = pcRef.current.get(senderId);
+        }
+        if (!pc) return;
+
+        const isPolite = userId > senderId;
+        const makingOffer = makingOfferRef.current.get(senderId) || false;
+        const offerCollision = type === 'offer' && (makingOffer || pc.signalingState !== 'stable');
+        const ignoreOffer = !isPolite && offerCollision;
+
+        if (ignoreOffer) {
+            console.log(`[WebRTC] Ignoring offer from ${senderId} due to collision`);
+            return;
+        }
+
+        try {
+            if (type === 'offer') {
+                await pc.setRemoteDescription(description || new RTCSessionDescription({ type: 'offer', sdp }));
+                await pc.setLocalDescription();
                 await addDoc(collection(db, `rooms/${roomId}/signaling`), {
-                    type: 'offer',
+                    type: 'answer',
                     senderId: userId,
-                    targetId: remoteUserId,
-                    sdp: offer.sdp,
+                    targetId: senderId,
+                    description: pc.localDescription?.toJSON(),
                     createdAt: Date.now()
                 });
-            } catch (e) {
-                console.error("Initial offer error", e);
+            } else if (type === 'answer') {
+                await pc.setRemoteDescription(description || new RTCSessionDescription({ type: 'answer', sdp }));
             }
+        } catch (err) {
+            console.error("Signaling error:", err);
         }
     }
 
     async function handleOffer(senderId: string, sdp: string) {
-        await createPeerConnection(senderId, false);
-        const pc = pcRef.current.get(senderId);
-        if (!pc) return;
-
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        await addDoc(collection(db, `rooms/${roomId}/signaling`), {
-            type: 'answer',
-            senderId: userId,
-            targetId: senderId,
-            sdp: answer.sdp,
-            createdAt: Date.now()
-        });
+        // Legacy, handled by handleSignaling now
     }
 
     async function handleAnswer(senderId: string, sdp: string) {
+        // Legacy, handled by handleSignaling now
+    }
+
+    async function handleIce(senderId: string, candidate: any) {
         const pc = pcRef.current.get(senderId);
-        if (!pc) return;
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+        if (pc) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+                console.error('Error adding ice candidate', e);
+            }
+        }
     }
 
     function closePeerConnection(remoteUserId: string) {
@@ -403,5 +419,5 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         setIsCameraOn(prev => !prev);
     }
 
-    return { peers, peerNames, localStream: localStream.current, screenStream, toggleScreenShare, isCameraOn, toggleCamera };
+    return { peers, peerNames, localStream: activeStream, screenStream, toggleScreenShare, isCameraOn, toggleCamera };
 }

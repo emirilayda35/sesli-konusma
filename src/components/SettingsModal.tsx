@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { FaTimes, FaCamera } from 'react-icons/fa';
+import { FaTimes, FaCamera, FaChevronLeft } from 'react-icons/fa';
 import Cropper from 'react-easy-crop';
 import { useAuth } from '../contexts/AuthContext';
 import { useUI } from '../contexts/UIContext';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getCroppedImg } from '../utils/imageUtils';
+import { useSound } from '../contexts/SoundContext';
 import '../styles/settings.css';
 
 interface SettingsModalProps {
@@ -20,6 +21,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadStatus, setUploadStatus] = useState<string>('');
+    const { playSound, settings: soundSettings, updateSettings: updateSoundSettings } = useSound();
 
     // Username change states
     const [newDisplayName, setNewDisplayName] = useState(userData?.displayName || '');
@@ -148,6 +150,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 return (
                     <>
                         <div className="settings-header">
+                            <button className="back-button" onClick={onClose}>
+                                <FaChevronLeft size={16} />
+                                <span>Geri</span>
+                            </button>
                             <h2>Hesabım</h2>
                         </div>
                         <div className="settings-section">
@@ -223,6 +229,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 return (
                     <>
                         <div className="settings-header">
+                            <button className="back-button" onClick={onClose}>
+                                <FaChevronLeft size={16} />
+                                <span>Geri</span>
+                            </button>
                             <h2>Görünüm</h2>
                         </div>
                         <div className="settings-section">
@@ -246,6 +256,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 return (
                     <>
                         <div className="settings-header">
+                            <button className="back-button" onClick={onClose}>
+                                <FaChevronLeft size={16} />
+                                <span>Geri</span>
+                            </button>
                             <h2>Ses ve Görüntü</h2>
                         </div>
 
@@ -315,7 +329,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                 </div>
                                 <div
                                     className={`settings-toggle ${settings.echoCancellation ? 'on' : ''}`}
-                                    onClick={() => updateSetting('echoCancellation', !settings.echoCancellation)}
+                                    onClick={() => {
+                                        playSound('click');
+                                        updateSetting('echoCancellation', !settings.echoCancellation);
+                                    }}
                                 />
                             </div>
 
@@ -326,7 +343,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                 </div>
                                 <div
                                     className={`settings-toggle ${settings.noiseSuppression ? 'on' : ''}`}
-                                    onClick={() => updateSetting('noiseSuppression', !settings.noiseSuppression)}
+                                    onClick={() => {
+                                        playSound('click');
+                                        updateSetting('noiseSuppression', !settings.noiseSuppression);
+                                    }}
                                 />
                             </div>
 
@@ -344,6 +364,43 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                 </div>
                             </div>
                         </div>
+
+                        <div className="settings-section">
+                            <h4>BİLDİRİMLER VE SESLER</h4>
+                            <div className="settings-toggle-wrapper">
+                                <div>
+                                    <div style={{ color: 'var(--text-header)' }}>Ses Efektleri</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Mesaj geldiğinde ve aramalarda ses çalar.</div>
+                                </div>
+                                <div
+                                    className={`settings-toggle ${soundSettings.enabled ? 'on' : ''}`}
+                                    onClick={() => {
+                                        playSound('click');
+                                        updateSoundSettings({ enabled: !soundSettings.enabled });
+                                    }}
+                                />
+                            </div>
+                            <div className="settings-field" style={{ marginTop: '12px' }}>
+                                <label className="settings-label">Efekt Ses Seviyesi</label>
+                                <div className="settings-slider-wrapper">
+                                    <input
+                                        type="range"
+                                        className="settings-slider"
+                                        min="0" max="1" step="0.1"
+                                        value={soundSettings.volume}
+                                        onChange={(e) => updateSoundSettings({ volume: parseFloat(e.target.value) })}
+                                    />
+                                    <span>%{Math.round(soundSettings.volume * 100)}</span>
+                                    <button
+                                        className="btn-primary"
+                                        style={{ marginLeft: '10px', padding: '4px 12px', height: '28px', fontSize: '11px' }}
+                                        onClick={() => playSound('click')}
+                                    >
+                                        TEST
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </>
                 );
         }
@@ -355,9 +412,9 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 <div className="settings-sidebar">
                     <div className="settings-nav">
                         <h3>Kullanıcı Ayarları</h3>
-                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => setActiveTab('account')}>Hesabım</div>
-                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => setActiveTab('voice')}>Ses ve Görüntü</div>
-                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Görünüm</div>
+                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('account'); }}>Hesabım</div>
+                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('voice'); }}>Ses ve Görüntü</div>
+                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('appearance'); }}>Görünüm</div>
                     </div>
                 </div>
 
@@ -365,7 +422,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                     {renderContent()}
                 </div>
 
-                <div className="settings-close" onClick={onClose}>
+                <div className="settings-close" onClick={() => { playSound('click'); onClose(); }}>
                     <div className="settings-close-circle">
                         <FaTimes size={18} />
                     </div>
