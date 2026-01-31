@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { FaTimes, FaCamera, FaChevronLeft } from 'react-icons/fa';
 import Cropper from 'react-easy-crop';
 import { useAuth } from '../contexts/AuthContext';
@@ -404,9 +405,9 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                     </>
                 );
         }
-    }
+    };
 
-    return (
+    return createPortal(
         <>
             <div className="settings-overlay">
                 <div className="settings-sidebar">
@@ -466,6 +467,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                     </div>
                 </div>
             )}
-        </>
+        </>,
+        document.body
     );
 }

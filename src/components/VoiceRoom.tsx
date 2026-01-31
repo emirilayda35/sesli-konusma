@@ -296,6 +296,13 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
             }
         };
         window.addEventListener('voice_settings_updated', handleSettingsUpdate);
+
+        // Apply saved output device on mount
+        const savedOutputId = localStorage.getItem('voice_outputId');
+        if (savedOutputId && savedOutputId !== 'default' && audioRef.current && (audioRef.current as any).setSinkId) {
+            (audioRef.current as any).setSinkId(savedOutputId).catch((e: any) => console.error("Error setting sink on mount", e));
+        }
+
         return () => window.removeEventListener('voice_settings_updated', handleSettingsUpdate);
     }, []);
 
