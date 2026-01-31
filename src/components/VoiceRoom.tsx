@@ -372,7 +372,16 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
         <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', minHeight: '220px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
             <audio ref={audioRef} autoPlay />
             {hasVideo ? (
-                <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                <video
+                    ref={(el) => {
+                        if (el && stream) {
+                            el.srcObject = stream;
+                        }
+                    }}
+                    autoPlay
+                    playsInline
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
             ) : photoURL ? (
                 <img src={photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (

@@ -76,39 +76,32 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     const audioTrack = stream.getAudioTracks()[0];
                     const videoTrack = stream.getVideoTracks()[0];
 
+                    // Audio
                     const audioSender = pc.getSenders().find(s => s.track?.kind === 'audio');
                     if (audioSender && audioTrack) {
-                        try {
-                            audioSender.replaceTrack(audioTrack);
-                        } catch (e) {
-                            console.error("Error replacing audio track", e);
-                        }
+                        audioSender.replaceTrack(audioTrack).catch(e => console.error("Audio replace failed", e));
                     } else if (!audioSender && audioTrack) {
-                        // If no audio sender yet, add it (negotiation needed)
-                        try {
-                            pc.addTrack(audioTrack, stream);
-                        } catch (e) {
-                            console.error("Error adding audio track", e);
-                        }
+                        pc.addTrack(audioTrack, stream);
                     }
 
-                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video' && !s.track.label.toLowerCase().includes('screen'));
-                    if (videoSender && videoTrack) {
-                        try {
-                            videoSender.replaceTrack(videoTrack);
-                        } catch (e) {
-                            console.error("Error replacing video track", e);
-                        }
-                    } else if (videoTrack && !videoSender) {
-                        try {
+                    // Video
+                    const videoSender = pc.getSenders().find(s =>
+                        s.track?.kind === 'video' &&
+                        s.track.label && !s.track.label.toLowerCase().includes('screen')
+                    );
+
+                    if (videoTrack) {
+                        if (videoSender) {
+                            videoSender.replaceTrack(videoTrack).catch(e => {
+                                console.warn("Video replace failed, adding as new track", e);
+                                pc.addTrack(videoTrack, stream);
+                            });
+                        } else {
                             pc.addTrack(videoTrack, stream);
-                        } catch (e) {
-                            console.error("Error adding video track", e);
                         }
-                    } else if (!videoTrack && videoSender) {
+                    } else if (videoSender) {
+                        // Camera turned off, remove the video track sender
                         try {
-                            // Instead of removing, we might want to just disable or send black frames 
-                            // to avoid renegotiation, but removing is cleaner for "camera off".
                             pc.removeTrack(videoSender);
                         } catch (e) {
                             console.error("Error removing video track", e);
@@ -232,26 +225,22 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
         pc.ontrack = (event) => {
             setPeers(prev => {
-                const next = new Map(prev);
-                const existingStream = next.get(remoteUserId);
-                const remoteStream = existingStream || new MediaStream();
+                const existingStream = prev.get(remoteUserId);
+                const remoteStream = existingStream || event.streams[0] || new MediaStream();
 
+                // Collect tracks
                 if (event.streams && event.streams[0]) {
-                    event.streams[0].getTracks().forEach(track => {
-                        if (!remoteStream.getTracks().find(t => t.id === track.id)) {
+                    event.streams[0].getTracks().forEach((track: MediaStreamTrack) => {
+                        if (!remoteStream.getTracks().find((t: MediaStreamTrack) => t.id === track.id)) {
                             remoteStream.addTrack(track);
                         }
                     });
-                } else {
-                    // Fallback for tracks added without a stream (uncommon but possible with addTrack(track))
-                    // or if replaceTrack was used in a way that doesn't signal stream binding.
-                    if (!remoteStream.getTracks().find(t => t.id === event.track.id)) {
-                        remoteStream.addTrack(event.track);
-                    }
+                } else if (!remoteStream.getTracks().find((t: MediaStreamTrack) => t.id === event.track.id)) {
+                    remoteStream.addTrack(event.track);
                 }
 
-                next.set(remoteUserId, new MediaStream(remoteStream.getTracks()));
-                return next;
+                if (existingStream === remoteStream) return prev;
+                return new Map(prev).set(remoteUserId, remoteStream);
             });
         };
 
