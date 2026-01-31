@@ -30,6 +30,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
     const pcRef = useRef<Map<string, RTCPeerConnection>>(new Map());
     const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+    const candidateQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
     const [mountedAt] = useState(Date.now());
 
     useEffect(() => {
@@ -338,6 +339,18 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             } else if (type === 'answer') {
                 await pc.setRemoteDescription(description || new RTCSessionDescription({ type: 'answer', sdp }));
             }
+            if (type === 'offer' || type === 'answer') {
+                const candidates = candidateQueueRef.current.get(senderId);
+                if (candidates && candidates.length > 0) {
+                    console.log(`[WebRTC] Flushing ${candidates.length} buffered candidates for ${senderId}`);
+                    for (const candidate of candidates) {
+                        try {
+                            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                        } catch (e) { console.error("Error adding buffered candidate", e); }
+                    }
+                    candidateQueueRef.current.delete(senderId);
+                }
+            }
         } catch (err) {
             console.error("Signaling error:", err);
         }
@@ -355,7 +368,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         const pc = pcRef.current.get(senderId);
         if (pc) {
             try {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                if (pc.remoteDescription && pc.remoteDescription.type) {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } else {
+                    // Buffer candidate
+                    const queue = candidateQueueRef.current.get(senderId) || [];
+                    queue.push(candidate);
+                    candidateQueueRef.current.set(senderId, queue);
+                    console.log(`[WebRTC] Buffered ICE candidate for ${senderId} (remoteDesc not ready)`);
+                }
             } catch (e) {
                 console.error('Error adding ice candidate', e);
             }
