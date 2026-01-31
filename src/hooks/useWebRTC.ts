@@ -21,8 +21,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const [peers, setPeers] = useState<Map<string, MediaStream>>(new Map());
     const [peerNames, setPeerNames] = useState<Map<string, string>>(new Map());
     const [isCameraOn, setIsCameraOn] = useState(false);
+
+    // UI Refs
     const localStream = useRef<MediaStream | null>(null);
     const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+
+    // Internal Refs for separation
+    const audioStreamRef = useRef<MediaStream | null>(null);
+    const videoStreamRef = useRef<MediaStream | null>(null);
+
     const pcRef = useRef<Map<string, RTCPeerConnection>>(new Map());
     const makingOfferRef = useRef<Map<string, boolean>>(new Map());
     const candidateQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
@@ -30,27 +37,48 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isStreamReady, setIsStreamReady] = useState(false);
 
-    // 1. getUserMedia Loop - MUST run before peer connections try to send video
+    // --- Helper: Combine Streams & Update Peers ---
+    const updateLocalAndPeers = () => {
+        const newStream = new MediaStream();
+        if (audioStreamRef.current) {
+            audioStreamRef.current.getTracks().forEach(t => newStream.addTrack(t));
+        }
+        if (videoStreamRef.current) {
+            videoStreamRef.current.getTracks().forEach(t => newStream.addTrack(t));
+        }
+
+        localStream.current = newStream;
+        setActiveStream(newStream); // Triggers React render
+        setIsStreamReady(true);
+
+        console.log('[WEBRTC_DEBUG] Combined Local Stream', {
+            audio: newStream.getAudioTracks().length,
+            video: newStream.getVideoTracks().length
+        });
+
+        // Update all connected peers
+        pcRef.current.forEach(pc => {
+            updatePeerTracks(pc, newStream, screenStream);
+        });
+    };
+
+    // --- Effect 1: Audio Management ---
     useEffect(() => {
         let mounted = true;
 
-        async function setupStream() {
-            // STRICT: Stop old tracks and wait for hardware release
-            if (localStream.current) {
-                console.log('[WEBRTC_DEBUG] Stopping previous tracks');
-                localStream.current.getTracks().forEach(t => t.stop());
-                localStream.current = null;
+        async function setupAudio() {
+            // Stop existing audio tracks if any (e.g. settings change)
+            if (audioStreamRef.current) {
+                audioStreamRef.current.getTracks().forEach(t => t.stop());
+                audioStreamRef.current = null;
             }
-            setActiveStream(null);
-
-            // Wait 250ms for device to release
-            await new Promise(r => setTimeout(r, 250));
 
             try {
                 const inputId = localStorage.getItem('voice_inputId') || 'default';
                 const echo = localStorage.getItem('voice_echoCancellation') !== 'false';
                 const noise = localStorage.getItem('voice_noiseSuppression') !== 'false';
 
+                console.log('[WEBRTC_DEBUG] Setting up Audio...');
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         deviceId: inputId !== 'default' ? { exact: inputId } : undefined,
@@ -58,11 +86,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         noiseSuppression: noise,
                         autoGainControl: true
                     },
-                    video: isCameraOn ? {
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        frameRate: { ideal: 30 }
-                    } : false
+                    video: false // STRICTLY AUDIO
                 });
 
                 if (!mounted) {
@@ -70,54 +94,106 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     return;
                 }
 
-                console.log('[WEBRTC_DEBUG] Stream acquired', stream.id, stream.getTracks().map(t => t.kind));
-
-                localStream.current = stream;
-                setActiveStream(stream);
-                setIsStreamReady(true);
-
-                pcRef.current.forEach(pc => {
-                    updatePeerTracks(pc, stream, screenStream);
-                });
+                console.log('[WEBRTC_DEBUG] Audio Stream Acquired', stream.id);
+                audioStreamRef.current = stream;
+                updateLocalAndPeers();
 
             } catch (err: any) {
-                console.error("[WEBRTC_DEBUG] Error getting user media:", err);
-                if (err.name === 'NotReadableError' || err.message?.includes('Device in use')) {
-                    alert("Kamera/Mikrofon kullanımda! Lütfen diğer uygulamaları (Zoom, Skype vb.) kapatıp sayfayı yenileyin.");
+                console.error("[WEBRTC_DEBUG] Error getting audio:", err);
+                if (err.name === 'NotReadableError') {
+                    alert("Mikrofon kullanımda! Lütfen diğer uygulamaları kapatın.");
                 }
-
-                // Ensure peers are cleared
-                pcRef.current.forEach(pc => {
-                    updatePeerTracks(pc, null, screenStream);
-                });
             }
         }
 
         const handleSettingsUpdate = (e: any) => {
             if (['inputId', 'echoCancellation', 'noiseSuppression'].includes(e.detail.key)) {
-                setupStream();
+                setupAudio();
             }
         };
 
         window.addEventListener('voice_settings_updated', handleSettingsUpdate);
-        setupStream();
+        setupAudio();
 
         return () => {
             mounted = false;
             window.removeEventListener('voice_settings_updated', handleSettingsUpdate);
-            if (localStream.current) {
-                localStream.current.getTracks().forEach(t => t.stop());
+            if (audioStreamRef.current) {
+                audioStreamRef.current.getTracks().forEach(t => t.stop());
+            }
+        };
+    }, []); // Run once + on custom event
+
+    // --- Effect 2: Video Management ---
+    useEffect(() => {
+        let mounted = true;
+
+        async function setupVideo() {
+            if (!isCameraOn) {
+                // Camera OFF logic
+                if (videoStreamRef.current) {
+                    console.log('[WEBRTC_DEBUG] Stopping Camera');
+                    videoStreamRef.current.getTracks().forEach(t => t.stop());
+                    videoStreamRef.current = null;
+                    updateLocalAndPeers();
+                }
+                return;
+            }
+
+            // Camera ON logic
+            console.log('[WEBRTC_DEBUG] Starting Camera...');
+
+            // Wait for hardware release (prevents Device in use errors)
+            await new Promise(r => setTimeout(r, 250));
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false, // STRICTLY VIDEO
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 30 }
+                    }
+                });
+
+                if (!mounted) {
+                    stream.getTracks().forEach(t => t.stop());
+                    return;
+                }
+
+                console.log('[WEBRTC_DEBUG] Video Stream Acquired', stream.id);
+                videoStreamRef.current = stream;
+                updateLocalAndPeers();
+
+            } catch (err: any) {
+                console.error("[WEBRTC_DEBUG] Error getting video:", err);
+                setIsCameraOn(false); // Reset UI state
+                if (err.name === 'NotReadableError' || err.message?.includes('Device in use')) {
+                    alert("Kamera kullanımda! Lütfen diğer uygulamaları (Zoom, Skype vb.) kapatıp sayfayı yenileyin.");
+                }
+            }
+        }
+
+        setupVideo();
+
+        return () => {
+            mounted = false;
+            if (videoStreamRef.current) {
+                videoStreamRef.current.getTracks().forEach(t => t.stop());
             }
         };
     }, [isCameraOn]);
-    // ^ Re-run when camera toggles. 
 
     // Helper to add/replace tracks strictly
     function updatePeerTracks(pc: RTCPeerConnection, stream: MediaStream | null, currentScreenStream: MediaStream | null) {
-        if (!stream && !currentScreenStream) return;
-        console.log('[WEBRTC_DEBUG] updatePeerTracks called');
-
+        // If nothing to show, clear all
         const senders = pc.getSenders();
+        if (!stream && !currentScreenStream) {
+            senders.forEach(s => s.track && s.replaceTrack(null).catch(e => console.warn('Clear track error', e)));
+            return;
+        }
+
+        console.log('[WEBRTC_DEBUG] updatePeerTracks', { hasStream: !!stream, hasScreen: !!currentScreenStream });
 
         // Priority: Screen Share > Camera Video
         if (currentScreenStream) {
@@ -135,9 +211,9 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             }
 
             // Audio (Local Mic)
+            const audioSender = senders.find(s => s.track?.kind === 'audio');
             if (stream) {
                 const audioTrack = stream.getAudioTracks()[0];
-                const audioSender = senders.find(s => s.track?.kind === 'audio');
                 if (audioTrack) {
                     if (audioSender) {
                         audioSender.replaceTrack(audioTrack);
@@ -146,6 +222,9 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         pc.addTrack(audioTrack, stream);
                     }
                 }
+            } else if (audioSender) {
+                // Mute mic if stream is null but screen is on
+                audioSender.replaceTrack(null);
             }
         } else if (stream) {
             // Normal Camera + Mic
@@ -163,21 +242,18 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 }
             });
 
-            // If we are strictly switching OFF video (e.g. mic only), we need to ensure video sender is handled
-            // But usually stream only has audio if camera off. 
-            // If sender exists but stream has no track of that kind?
+            // Handle Camera Off (Video Sender -> Null)
             if (stream.getVideoTracks().length === 0) {
                 const videoSender = senders.find(s => s.track?.kind === 'video');
                 if (videoSender) {
                     console.log('[WEBRTC_DEBUG] Setting video sender to null (camera off)');
-                    videoSender.replaceTrack(null); // Stop sending video
+                    videoSender.replaceTrack(null);
                 }
             }
         }
     }
 
-    // Main Room Logic - Connects only after initial stream setup attempts? 
-    // We don't block fully on isStreamReady because we need to receive even if local mic fails.
+    // Main Room Logic
     useEffect(() => {
         let membersUnsubscribe: () => void;
         let signalingUnsubscribe: () => void;
@@ -196,7 +272,6 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         if (remoteUserId !== userId) {
                             setPeerNames(prev => new Map(prev).set(remoteUserId, data.name));
                             if (change.type === 'added') {
-                                // Create PC only if it doesn't exist
                                 if (!pcRef.current.has(remoteUserId)) {
                                     createPeerConnection(remoteUserId);
                                 }
@@ -246,7 +321,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             pcRef.current.forEach(pc => pc.close());
             deleteDoc(memberDoc);
         };
-    }, [roomId, userId, userName, db]); // Removed isStreamReady dependency to avoid reconnect loops
+    }, [roomId, userId, userName, db]);
 
     async function createPeerConnection(remoteUserId: string) {
         if (pcRef.current.has(remoteUserId)) return;
@@ -256,42 +331,31 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         pcRef.current.set(remoteUserId, pc);
         makingOfferRef.current.set(remoteUserId, false);
 
-        // 3. addTrack called BEFORE createOffer (via negotiationneeded)
+        // Add initial tracks
         if (localStream.current || screenStream) {
             updatePeerTracks(pc, localStream.current, screenStream);
         }
 
-        // 6. Ensure remoteVideo.srcObject is set inside ontrack
         pc.ontrack = (event) => {
-            console.log(`[WEBRTC_DEBUG] ontrack from ${remoteUserId}: ${event.track.kind}, enabled=${event.track.enabled}, muted=${event.track.muted}`);
-
-            // Force track enabled
+            console.log(`[WEBRTC_DEBUG] ontrack from ${remoteUserId}: ${event.track.kind}, enabled=${event.track.enabled}`);
             event.track.enabled = true;
 
-            // STRICT: Create new MediaStream for every track event
             const newStream = new MediaStream();
-
-            // Add existing tracks if we want to combine audio/video
-            // We need to fetch the existing tracks from the PREVIOUS state to merge them
             setPeers(prev => {
                 const next = new Map(prev);
                 const existingStream = next.get(remoteUserId);
-
                 if (existingStream) {
                     existingStream.getTracks().forEach(t => {
                         if (t.id !== event.track.id) newStream.addTrack(t);
                     });
                 }
-                newStream.addTrack(event.track); // Add the new one
-
-                // The UI <video> element ref callback will see the new object and set .srcObject
+                newStream.addTrack(event.track);
                 return next.set(remoteUserId, newStream);
             });
         };
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log(`[WEBRTC_DEBUG] ICE Candidate generated for ${remoteUserId}`);
                 addDoc(collection(db, `rooms/${roomId}/iceCandidates`), {
                     senderId: userId,
                     targetId: remoteUserId,
@@ -309,12 +373,8 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             console.log(`[WEBRTC_DEBUG] Connection State ${remoteUserId}: ${pc.connectionState}`);
         };
 
-        // 4. Do not create offer before tracks exist (implicitly handled by negotiationneeded only firing on addTrack?)
-        // Actually negotiationneeded fires on addTrack. So this order is enforced.
         pc.onnegotiationneeded = async () => {
             console.log(`[WEBRTC_DEBUG] Negotiation needed for ${remoteUserId}`);
-            // Basic glare handling implies we only negotiate if we are creating offer or if logic dictates
-            // Here we just fire it.
             try {
                 makingOfferRef.current.set(remoteUserId, true);
                 console.log('[WEBRTC_DEBUG] Creating offer');
@@ -400,7 +460,6 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     }
 
     async function handleIce(senderId: string, candidate: any) {
-        // ICE handling
         const pc = pcRef.current.get(senderId);
         if (pc) {
             console.log(`[WEBRTC_DEBUG] Adding ICE candidate from ${senderId}`);
@@ -416,10 +475,6 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             } catch (e) {
                 console.error('[WEBRTC_DEBUG] Error adding ice candidate', e);
             }
-        } else {
-            // Buffer if PC not ready yet? Or ignore if we create PC on demand in signaling
-            // Storing in queue even if PC doesn't exist yet would require a global queue, 
-            // but our architecture creates PeerConnection on user join (Snapshot), which usually happens first.
         }
     }
 
@@ -438,11 +493,8 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
 
     async function toggleScreenShare() {
         if (screenStream) {
-            // Stop sharing
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
-
-            // Revert to Camera
             pcRef.current.forEach(pc => {
                 updatePeerTracks(pc, localStream.current, null);
             });
