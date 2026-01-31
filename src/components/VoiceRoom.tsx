@@ -323,20 +323,42 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
 
         if (stream) {
             if (audioRef.current) audioRef.current.srcObject = stream;
-            if (videoRef.current) videoRef.current.srcObject = stream;
 
+            // Video handling
             const checkTracks = () => {
-                setHasVideo(stream.getVideoTracks().length > 0);
+                const hasVid = stream.getVideoTracks().length > 0;
+                setHasVideo(hasVid);
+                // Force assignment if valid
+                if (hasVid && videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                }
             };
+
             checkTracks();
-            stream.onaddtrack = checkTracks;
+            stream.onaddtrack = () => {
+                console.log(`[VoiceRoom] Stream addtrack for ${peerId}`);
+                checkTracks();
+            };
             stream.onremovetrack = checkTracks;
+
+            // Also force immediate assignment if already has video
+            if (stream.getVideoTracks().length > 0 && videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+
         } else {
             setHasVideo(false);
         }
 
         return () => unsub();
     }, [peerId, stream]);
+
+    // Separate effect to bind video ref when it mounts (if hasVideo becomes true)
+    useEffect(() => {
+        if (hasVideo && videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+        }
+    }, [hasVideo, stream]);
 
     useEffect(() => {
         if (!stream || stream.getAudioTracks().length === 0) {
@@ -373,14 +395,18 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
             <audio ref={audioRef} autoPlay />
             {hasVideo ? (
                 <video
-                    ref={(el) => {
-                        if (el && stream) {
-                            el.srcObject = stream;
-                        }
-                    }}
+                    ref={videoRef}
                     autoPlay
                     playsInline
                     style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    onLoadedMetadata={(e) => {
+                        console.log(`[VoiceRoom] Video loaded metadata ${peerId}`, e.currentTarget.videoWidth, e.currentTarget.videoHeight);
+                        e.currentTarget.play().catch(console.error);
+                    }}
+                    onCanPlay={() => console.log(`[VoiceRoom] Video CanPlay ${peerId}`)}
+                    onWaiting={() => console.log(`[VoiceRoom] Video Waiting ${peerId}`)}
+                    onStalled={() => console.log(`[VoiceRoom] Video Stalled ${peerId}`)}
+                    onError={(e) => console.error(`[VoiceRoom] Video Error ${peerId}`, e)}
                 />
             ) : photoURL ? (
                 <img src={photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />

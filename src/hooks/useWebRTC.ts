@@ -5,19 +5,14 @@ import {
     setDoc,
     onSnapshot,
     addDoc,
-    query,
-    where,
     deleteDoc,
-    getDocs
 } from 'firebase/firestore';
 
 const servers = {
     iceServers: [
-        { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
     ],
     iceCandidatePoolSize: 10,
 };
@@ -32,28 +27,29 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
     const makingOfferRef = useRef<Map<string, boolean>>(new Map());
     const candidateQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
     const [mountedAt] = useState(Date.now());
+    const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+    const [isStreamReady, setIsStreamReady] = useState(false);
 
+    // 1. getUserMedia Loop - MUST run before peer connections try to send video
     useEffect(() => {
-        async function setupStream() {
-            const inputId = localStorage.getItem('voice_inputId') || 'default';
-            const echo = localStorage.getItem('voice_echoCancellation') !== 'false';
-            const noise = localStorage.getItem('voice_noiseSuppression') !== 'false';
+        let mounted = true;
 
+        async function setupStream() {
+            // STRICT: Stop old tracks and wait for hardware release
             if (localStream.current) {
-                // Don't stop all tracks, we might want to keep some? 
-                // Actually the original code stopped all.
-                // If we are just toggling video, stopping audio might be bad if we don't restart it quickly.
-                // But getUserMedia returns a new stream with both if requested.
-                // To toggle video smoothly, we usually just `enabled = false` or `stop` the track and `addTrack`.
-                // For this refactor I will stick to the original logic of getting a new stream to be safe, 
-                // but implementation below tries to be smart about replacing tracks.
+                console.log('[WEBRTC_DEBUG] Stopping previous tracks');
+                localStream.current.getTracks().forEach(t => t.stop());
+                localStream.current = null;
             }
+            setActiveStream(null);
+
+            // Wait 250ms for device to release
+            await new Promise(r => setTimeout(r, 250));
 
             try {
-                // Stop existing tracks before getting new ones to release hardware
-                if (localStream.current) {
-                    localStream.current.getTracks().forEach(t => t.stop());
-                }
+                const inputId = localStorage.getItem('voice_inputId') || 'default';
+                const echo = localStorage.getItem('voice_echoCancellation') !== 'false';
+                const noise = localStorage.getItem('voice_noiseSuppression') !== 'false';
 
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
@@ -68,72 +64,120 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         frameRate: { ideal: 30 }
                     } : false
                 });
+
+                if (!mounted) {
+                    stream.getTracks().forEach(t => t.stop());
+                    return;
+                }
+
+                console.log('[WEBRTC_DEBUG] Stream acquired', stream.id, stream.getTracks().map(t => t.kind));
+
                 localStream.current = stream;
                 setActiveStream(stream);
+                setIsStreamReady(true);
 
-                // Update tracks in all active peer connections
                 pcRef.current.forEach(pc => {
-                    const audioTrack = stream.getAudioTracks()[0];
-                    const videoTrack = stream.getVideoTracks()[0];
-
-                    // Audio
-                    const audioSender = pc.getSenders().find(s => s.track?.kind === 'audio');
-                    if (audioSender && audioTrack) {
-                        audioSender.replaceTrack(audioTrack).catch(e => console.error("Audio replace failed", e));
-                    } else if (!audioSender && audioTrack) {
-                        pc.addTrack(audioTrack, stream);
-                    }
-
-                    // Video
-                    const videoSender = pc.getSenders().find(s =>
-                        s.track?.kind === 'video' &&
-                        s.track.label && !s.track.label.toLowerCase().includes('screen')
-                    );
-
-                    if (videoTrack) {
-                        if (videoSender) {
-                            videoSender.replaceTrack(videoTrack).catch(e => {
-                                console.warn("Video replace failed, adding as new track", e);
-                                pc.addTrack(videoTrack, stream);
-                            });
-                        } else {
-                            pc.addTrack(videoTrack, stream);
-                        }
-                    } else if (videoSender) {
-                        // Camera turned off, remove the video track sender
-                        try {
-                            pc.removeTrack(videoSender);
-                        } catch (e) {
-                            console.error("Error removing video track", e);
-                        }
-                    }
+                    updatePeerTracks(pc, stream, screenStream);
                 });
-            } catch (err) {
-                console.error("Error getting user media:", err);
+
+            } catch (err: any) {
+                console.error("[WEBRTC_DEBUG] Error getting user media:", err);
+                if (err.name === 'NotReadableError' || err.message?.includes('Device in use')) {
+                    alert("Kamera/Mikrofon kullanımda! Lütfen diğer uygulamaları (Zoom, Skype vb.) kapatıp sayfayı yenileyin.");
+                }
+
+                // Ensure peers are cleared
+                pcRef.current.forEach(pc => {
+                    updatePeerTracks(pc, null, screenStream);
+                });
             }
         }
 
         const handleSettingsUpdate = (e: any) => {
-            const { key } = e.detail;
-            if (['inputId', 'echoCancellation', 'noiseSuppression'].includes(key)) {
+            if (['inputId', 'echoCancellation', 'noiseSuppression'].includes(e.detail.key)) {
                 setupStream();
             }
         };
 
         window.addEventListener('voice_settings_updated', handleSettingsUpdate);
-
-        // Initial setup
         setupStream();
 
         return () => {
+            mounted = false;
             window.removeEventListener('voice_settings_updated', handleSettingsUpdate);
             if (localStream.current) {
                 localStream.current.getTracks().forEach(t => t.stop());
             }
         };
-    }, [isCameraOn]); // Re-run stream setup when camera toggles
+    }, [isCameraOn]);
+    // ^ Re-run when camera toggles. 
 
-    // Main Room Logic
+    // Helper to add/replace tracks strictly
+    function updatePeerTracks(pc: RTCPeerConnection, stream: MediaStream | null, currentScreenStream: MediaStream | null) {
+        if (!stream && !currentScreenStream) return;
+        console.log('[WEBRTC_DEBUG] updatePeerTracks called');
+
+        const senders = pc.getSenders();
+
+        // Priority: Screen Share > Camera Video
+        if (currentScreenStream) {
+            // Video (Screen)
+            const screenTrack = currentScreenStream.getVideoTracks()[0];
+            const videoSender = senders.find(s => s.track?.kind === 'video');
+            if (screenTrack) {
+                if (videoSender) {
+                    console.log('[WEBRTC_DEBUG] Replacing video track with screen track');
+                    videoSender.replaceTrack(screenTrack);
+                } else {
+                    console.log('[WEBRTC_DEBUG] Adding screen track');
+                    pc.addTrack(screenTrack, currentScreenStream);
+                }
+            }
+
+            // Audio (Local Mic)
+            if (stream) {
+                const audioTrack = stream.getAudioTracks()[0];
+                const audioSender = senders.find(s => s.track?.kind === 'audio');
+                if (audioTrack) {
+                    if (audioSender) {
+                        audioSender.replaceTrack(audioTrack);
+                    } else {
+                        console.log('[WEBRTC_DEBUG] Adding audio track');
+                        pc.addTrack(audioTrack, stream);
+                    }
+                }
+            }
+        } else if (stream) {
+            // Normal Camera + Mic
+            stream.getTracks().forEach(track => {
+                const sender = senders.find(s => s.track?.kind === track.kind);
+                if (sender) {
+                    console.log(`[WEBRTC_DEBUG] Replacing ${track.kind} track`);
+                    sender.replaceTrack(track).catch(e => {
+                        console.warn("[WEBRTC_DEBUG] Replace track failed, adding fallback", e);
+                        pc.addTrack(track, stream);
+                    });
+                } else {
+                    console.log(`[WEBRTC_DEBUG] Adding ${track.kind} track`);
+                    pc.addTrack(track, stream);
+                }
+            });
+
+            // If we are strictly switching OFF video (e.g. mic only), we need to ensure video sender is handled
+            // But usually stream only has audio if camera off. 
+            // If sender exists but stream has no track of that kind?
+            if (stream.getVideoTracks().length === 0) {
+                const videoSender = senders.find(s => s.track?.kind === 'video');
+                if (videoSender) {
+                    console.log('[WEBRTC_DEBUG] Setting video sender to null (camera off)');
+                    videoSender.replaceTrack(null); // Stop sending video
+                }
+            }
+        }
+    }
+
+    // Main Room Logic - Connects only after initial stream setup attempts? 
+    // We don't block fully on isStreamReady because we need to receive even if local mic fails.
     useEffect(() => {
         let membersUnsubscribe: () => void;
         let signalingUnsubscribe: () => void;
@@ -141,12 +185,10 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         const memberDoc = doc(db, `rooms/${roomId}/members`, userId);
 
         async function setup() {
-            // 2. Register in Room
             await setDoc(memberDoc, { name: userName, joinedAt: Date.now() });
 
-            // 3. Listen for other members
-            membersUnsubscribe = onSnapshot(collection(db, `rooms/${roomId}/members`), async (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
+            membersUnsubscribe = onSnapshot(collection(db, `rooms/${roomId}/members`), (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
                     const data = change.doc.data();
                     const remoteUserId = change.doc.id;
 
@@ -154,7 +196,10 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                         if (remoteUserId !== userId) {
                             setPeerNames(prev => new Map(prev).set(remoteUserId, data.name));
                             if (change.type === 'added') {
-                                createPeerConnection(remoteUserId);
+                                // Create PC only if it doesn't exist
+                                if (!pcRef.current.has(remoteUserId)) {
+                                    createPeerConnection(remoteUserId);
+                                }
                             }
                         }
                     }
@@ -169,25 +214,23 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 });
             });
 
-            // 4. Listen for signaling messages
-            signalingUnsubscribe = onSnapshot(collection(db, `rooms/${roomId}/signaling`), async (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
+            signalingUnsubscribe = onSnapshot(collection(db, `rooms/${roomId}/signaling`), (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         if (data.targetId === userId && data.createdAt > mountedAt) {
-                            await handleSignaling(data);
+                            handleSignaling(data);
                         }
                     }
                 });
             });
 
-            // 5. Listen for ICE candidates
             iceUnsubscribe = onSnapshot(collection(db, `rooms/${roomId}/iceCandidates`), (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
+                snapshot.docChanges().forEach((change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         if (data.targetId === userId && data.createdAt > mountedAt) {
-                            await handleIce(data.senderId, data.candidate);
+                            handleIce(data.senderId, data.candidate);
                         }
                     }
                 });
@@ -203,49 +246,52 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             pcRef.current.forEach(pc => pc.close());
             deleteDoc(memberDoc);
         };
-    }, [roomId, userId, userName, db]);
+    }, [roomId, userId, userName, db]); // Removed isStreamReady dependency to avoid reconnect loops
 
     async function createPeerConnection(remoteUserId: string) {
         if (pcRef.current.has(remoteUserId)) return;
+        console.log(`[WEBRTC_DEBUG] Creating PeerConnection for ${remoteUserId}`);
 
         const pc = new RTCPeerConnection(servers);
         pcRef.current.set(remoteUserId, pc);
         makingOfferRef.current.set(remoteUserId, false);
 
-        // Polite/Impolite logic to handle glare (signaling collision)
-        // The peer with the "higher" ID is polite and will wait.
-        const isPolite = userId > remoteUserId;
-        let ignoreOffer = false;
-
-        if (localStream.current) {
-            localStream.current.getTracks().forEach(track => {
-                pc.addTrack(track, localStream.current!);
-            });
+        // 3. addTrack called BEFORE createOffer (via negotiationneeded)
+        if (localStream.current || screenStream) {
+            updatePeerTracks(pc, localStream.current, screenStream);
         }
 
+        // 6. Ensure remoteVideo.srcObject is set inside ontrack
         pc.ontrack = (event) => {
+            console.log(`[WEBRTC_DEBUG] ontrack from ${remoteUserId}: ${event.track.kind}, enabled=${event.track.enabled}, muted=${event.track.muted}`);
+
+            // Force track enabled
+            event.track.enabled = true;
+
+            // STRICT: Create new MediaStream for every track event
+            const newStream = new MediaStream();
+
+            // Add existing tracks if we want to combine audio/video
+            // We need to fetch the existing tracks from the PREVIOUS state to merge them
             setPeers(prev => {
-                const existingStream = prev.get(remoteUserId);
-                const remoteStream = existingStream || event.streams[0] || new MediaStream();
+                const next = new Map(prev);
+                const existingStream = next.get(remoteUserId);
 
-                // Collect tracks
-                if (event.streams && event.streams[0]) {
-                    event.streams[0].getTracks().forEach((track: MediaStreamTrack) => {
-                        if (!remoteStream.getTracks().find((t: MediaStreamTrack) => t.id === track.id)) {
-                            remoteStream.addTrack(track);
-                        }
+                if (existingStream) {
+                    existingStream.getTracks().forEach(t => {
+                        if (t.id !== event.track.id) newStream.addTrack(t);
                     });
-                } else if (!remoteStream.getTracks().find((t: MediaStreamTrack) => t.id === event.track.id)) {
-                    remoteStream.addTrack(event.track);
                 }
+                newStream.addTrack(event.track); // Add the new one
 
-                if (existingStream === remoteStream) return prev;
-                return new Map(prev).set(remoteUserId, remoteStream);
+                // The UI <video> element ref callback will see the new object and set .srcObject
+                return next.set(remoteUserId, newStream);
             });
         };
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log(`[WEBRTC_DEBUG] ICE Candidate generated for ${remoteUserId}`);
                 addDoc(collection(db, `rooms/${roomId}/iceCandidates`), {
                     senderId: userId,
                     targetId: remoteUserId,
@@ -255,9 +301,23 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             }
         };
 
+        pc.oniceconnectionstatechange = () => {
+            console.log(`[WEBRTC_DEBUG] ICE State ${remoteUserId}: ${pc.iceConnectionState}`);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`[WEBRTC_DEBUG] Connection State ${remoteUserId}: ${pc.connectionState}`);
+        };
+
+        // 4. Do not create offer before tracks exist (implicitly handled by negotiationneeded only firing on addTrack?)
+        // Actually negotiationneeded fires on addTrack. So this order is enforced.
         pc.onnegotiationneeded = async () => {
+            console.log(`[WEBRTC_DEBUG] Negotiation needed for ${remoteUserId}`);
+            // Basic glare handling implies we only negotiate if we are creating offer or if logic dictates
+            // Here we just fire it.
             try {
                 makingOfferRef.current.set(remoteUserId, true);
+                console.log('[WEBRTC_DEBUG] Creating offer');
                 await pc.setLocalDescription();
                 await addDoc(collection(db, `rooms/${roomId}/signaling`), {
                     type: 'offer',
@@ -267,16 +327,11 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     createdAt: Date.now()
                 });
             } catch (err) {
-                console.error("Negotiation error:", err);
+                console.error("[WEBRTC_DEBUG] Negotiation error:", err);
             } finally {
                 makingOfferRef.current.set(remoteUserId, false);
             }
         };
-
-        // We use a separate listener for signaling within this closure to manage state easier,
-        // but since we already have a global listener, we need to ensure they don't fight.
-        // Actually, the global listener is better for centralized management.
-        // Let's stick to the global listener but update it to handle the new logic.
     }
 
     async function handleSignaling(data: any) {
@@ -289,13 +344,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         }
         if (!pc) return;
 
+        console.log(`[WEBRTC_DEBUG] Received Signal ${type} from ${senderId}`);
+
         const isPolite = userId > senderId;
         const makingOffer = makingOfferRef.current.get(senderId) || false;
         const offerCollision = type === 'offer' && (makingOffer || pc.signalingState !== 'stable');
         const ignoreOffer = !isPolite && offerCollision;
 
         if (ignoreOffer) {
-            console.log(`[WebRTC] Ignoring offer from ${senderId} due to collision`);
+            console.log(`[WEBRTC_DEBUG] Ignoring offer conflict with ${senderId}`);
             return;
         }
 
@@ -304,19 +361,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 const offerDescription = description || new RTCSessionDescription({ type: 'offer', sdp });
 
                 if (offerCollision && isPolite) {
-                    try {
-                        await Promise.all([
-                            pc.setLocalDescription({ type: 'rollback' }),
-                            pc.setRemoteDescription(offerDescription)
-                        ]);
-                    } catch (rollbackErr) {
-                        console.warn("Rollback failed, trying standard setRemote", rollbackErr);
-                        await pc.setRemoteDescription(offerDescription);
-                    }
+                    await Promise.all([
+                        pc.setLocalDescription({ type: 'rollback' }),
+                        pc.setRemoteDescription(offerDescription)
+                    ]);
                 } else {
                     await pc.setRemoteDescription(offerDescription);
                 }
 
+                console.log('[WEBRTC_DEBUG] Creating answer');
                 await pc.setLocalDescription();
                 await addDoc(collection(db, `rooms/${roomId}/signaling`), {
                     type: 'answer',
@@ -326,49 +379,47 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     createdAt: Date.now()
                 });
             } else if (type === 'answer') {
+                if (pc.signalingState === 'stable') {
+                    console.warn(`[WEBRTC_DEBUG] Signaling state already stable, ignoring answer from ${senderId}`);
+                    return;
+                }
                 await pc.setRemoteDescription(description || new RTCSessionDescription({ type: 'answer', sdp }));
             }
-            if (type === 'offer' || type === 'answer') {
-                const candidates = candidateQueueRef.current.get(senderId);
-                if (candidates && candidates.length > 0) {
-                    console.log(`[WebRTC] Flushing ${candidates.length} buffered candidates for ${senderId}`);
-                    for (const candidate of candidates) {
-                        try {
-                            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                        } catch (e) { console.error("Error adding buffered candidate", e); }
-                    }
-                    candidateQueueRef.current.delete(senderId);
+
+            const candidates = candidateQueueRef.current.get(senderId);
+            if (candidates) {
+                console.log(`[WEBRTC_DEBUG] Flushing ${candidates.length} queued candidates for ${senderId}`);
+                for (const candidate of candidates) {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
                 }
+                candidateQueueRef.current.delete(senderId);
             }
         } catch (err) {
-            console.error("Signaling error:", err);
+            console.error("[WEBRTC_DEBUG] Signaling error:", err);
         }
     }
 
-    async function handleOffer(senderId: string, sdp: string) {
-        // Legacy, handled by handleSignaling now
-    }
-
-    async function handleAnswer(senderId: string, sdp: string) {
-        // Legacy, handled by handleSignaling now
-    }
-
     async function handleIce(senderId: string, candidate: any) {
+        // ICE handling
         const pc = pcRef.current.get(senderId);
         if (pc) {
+            console.log(`[WEBRTC_DEBUG] Adding ICE candidate from ${senderId}`);
             try {
                 if (pc.remoteDescription && pc.remoteDescription.type) {
                     await pc.addIceCandidate(new RTCIceCandidate(candidate));
                 } else {
-                    // Buffer candidate
+                    console.log(`[WEBRTC_DEBUG] Queueing ICE candidate from ${senderId}`);
                     const queue = candidateQueueRef.current.get(senderId) || [];
                     queue.push(candidate);
                     candidateQueueRef.current.set(senderId, queue);
-                    console.log(`[WebRTC] Buffered ICE candidate for ${senderId} (remoteDesc not ready)`);
                 }
             } catch (e) {
-                console.error('Error adding ice candidate', e);
+                console.error('[WEBRTC_DEBUG] Error adding ice candidate', e);
             }
+        } else {
+            // Buffer if PC not ready yet? Or ignore if we create PC on demand in signaling
+            // Storing in queue even if PC doesn't exist yet would require a global queue, 
+            // but our architecture creates PeerConnection on user join (Snapshot), which usually happens first.
         }
     }
 
@@ -385,28 +436,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         }
     }
 
-    const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
-
     async function toggleScreenShare() {
         if (screenStream) {
+            // Stop sharing
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
 
-            // Revert changes
+            // Revert to Camera
             pcRef.current.forEach(pc => {
-                const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (videoSender) {
-                    // Always remove track first to clean up state
-                    pc.removeTrack(videoSender);
-
-                    // If camera was on, we need to add it back as a NEW track to ensure clean negotiation
-                    if (isCameraOn && localStream.current) {
-                        const cameraTrack = localStream.current.getVideoTracks()[0];
-                        if (cameraTrack) {
-                            pc.addTrack(cameraTrack, localStream.current);
-                        }
-                    }
-                }
+                updatePeerTracks(pc, localStream.current, null);
             });
         } else {
             try {
@@ -415,29 +453,13 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 const screenTrack = stream.getVideoTracks()[0];
 
                 pcRef.current.forEach(pc => {
-                    const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-                    if (videoSender) {
-                        // Remove existing video track (e.g. camera) to force renegotiation
-                        pc.removeTrack(videoSender);
-                    }
-
-                    // Add screen track as a new track
-                    pc.addTrack(screenTrack, stream);
+                    updatePeerTracks(pc, localStream.current, stream);
                 });
 
                 screenTrack.onended = () => {
                     setScreenStream(null);
                     pcRef.current.forEach(pc => {
-                        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-                        if (videoSender) {
-                            pc.removeTrack(videoSender);
-                            if (isCameraOn && localStream.current) {
-                                const cameraTrack = localStream.current.getVideoTracks()[0];
-                                if (cameraTrack) {
-                                    pc.addTrack(cameraTrack, localStream.current);
-                                }
-                            }
-                        }
+                        updatePeerTracks(pc, localStream.current, null);
                     });
                 };
             } catch (err) {
