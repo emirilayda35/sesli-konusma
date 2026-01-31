@@ -235,13 +235,20 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 const existingStream = next.get(remoteUserId);
                 const remoteStream = existingStream || new MediaStream();
 
-                event.streams[0].getTracks().forEach(track => {
-                    if (!remoteStream.getTracks().find(t => t.id === track.id)) {
-                        remoteStream.addTrack(track);
+                if (event.streams && event.streams[0]) {
+                    event.streams[0].getTracks().forEach(track => {
+                        if (!remoteStream.getTracks().find(t => t.id === track.id)) {
+                            remoteStream.addTrack(track);
+                        }
+                    });
+                } else {
+                    // Fallback for tracks added without a stream (uncommon but possible with addTrack(track))
+                    // or if replaceTrack was used in a way that doesn't signal stream binding.
+                    if (!remoteStream.getTracks().find(t => t.id === event.track.id)) {
+                        remoteStream.addTrack(event.track);
                     }
-                });
+                }
 
-                // Set a new stream reference to trigger React re-render
                 next.set(remoteUserId, new MediaStream(remoteStream.getTracks()));
                 return next;
             });
@@ -375,19 +382,19 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
 
-            // Revert to camera if on, or remove track
+            // Revert changes
             pcRef.current.forEach(pc => {
                 const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
                 if (videoSender) {
+                    // Always remove track first to clean up state
+                    pc.removeTrack(videoSender);
+
+                    // If camera was on, we need to add it back as a NEW track to ensure clean negotiation
                     if (isCameraOn && localStream.current) {
                         const cameraTrack = localStream.current.getVideoTracks()[0];
                         if (cameraTrack) {
-                            videoSender.replaceTrack(cameraTrack).catch(e => console.error("Error reverting to camera", e));
-                        } else {
-                            pc.removeTrack(videoSender);
+                            pc.addTrack(cameraTrack, localStream.current);
                         }
-                    } else {
-                        pc.removeTrack(videoSender);
                     }
                 }
             });
@@ -400,12 +407,12 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 pcRef.current.forEach(pc => {
                     const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
                     if (videoSender) {
-                        // Replace existing video track (seamless)
-                        videoSender.replaceTrack(screenTrack).catch(e => console.error("Error replacing with screen", e));
-                    } else {
-                        // Add new track (triggers negotiation)
-                        pc.addTrack(screenTrack, stream);
+                        // Remove existing video track (e.g. camera) to force renegotiation
+                        pc.removeTrack(videoSender);
                     }
+
+                    // Add screen track as a new track
+                    pc.addTrack(screenTrack, stream);
                 });
 
                 screenTrack.onended = () => {
@@ -413,15 +420,12 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                     pcRef.current.forEach(pc => {
                         const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
                         if (videoSender) {
+                            pc.removeTrack(videoSender);
                             if (isCameraOn && localStream.current) {
                                 const cameraTrack = localStream.current.getVideoTracks()[0];
                                 if (cameraTrack) {
-                                    videoSender.replaceTrack(cameraTrack).catch(e => console.error("Error reverting to camera", e));
-                                } else {
-                                    pc.removeTrack(videoSender);
+                                    pc.addTrack(cameraTrack, localStream.current);
                                 }
-                            } else {
-                                pc.removeTrack(videoSender);
                             }
                         }
                     });
