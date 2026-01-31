@@ -32,6 +32,24 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
         db
     );
 
+    const [maximizedPeerId, setMaximizedPeerId] = useState<string | null>(null);
+    const [rotation, setRotation] = useState(0);
+
+    const handleFullscreen = async (elementId: string) => {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        try {
+            if ((element as any).requestFullscreen) await (element as any).requestFullscreen();
+            else if ((element as any).webkitRequestFullscreen) await (element as any).webkitRequestFullscreen();
+
+            if (screen.orientation && (screen.orientation as any).lock) {
+                await (screen.orientation as any).lock('landscape').catch(() => { });
+            }
+        } catch (err) {
+            console.error("Fullscreen error:", err);
+        }
+    };
+
     useEffect(() => {
         const handleSettingsUpdate = (e: any) => {
             if (e.detail.key === 'sensitivity') {
@@ -141,6 +159,27 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
 
     return (
         <div className="voice-room" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+            <style>{`
+                .speaker-card:hover .video-card-controls {
+                    opacity: 1 !important;
+                }
+                .control-btn {
+                    background: rgba(0,0,0,0.4);
+                    border: none;
+                    color: white;
+                    padding: 8px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    display: flex;
+                    alignItems: center;
+                    backdrop-filter: blur(4px);
+                    transition: all 0.2s ease;
+                }
+                .control-btn:hover {
+                    background: rgba(255,255,255,0.2);
+                    transform: scale(1.1);
+                }
+            `}</style>
             <div className="voice-header" style={{ justifyContent: 'flex-start' }}>
                 {onBack && (
                     <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0 }}>
@@ -149,62 +188,131 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     </button>
                 )}
             </div>
-            <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 450px))', gap: 16, padding: 20, justifyContent: 'center', alignContent: 'center' }}>
+            {/* Grid View vs Focusing View */}
+            {!maximizedPeerId ? (
+                <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 450px))', gap: 16, padding: 20, justifyContent: 'center', alignContent: 'center' }}>
+                    {/* Local User Card */}
+                    <div
+                        id="local-video-card"
+                        className={`speaker-card ${isSpeaking ? 'speaking' : ''}`}
+                        style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}
+                    >
+                        {screenStream ? (
+                            <video
+                                ref={(el) => { if (el) el.srcObject = screenStream; }}
+                                autoPlay
+                                muted
+                                playsInline
+                                style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'absolute', top: 0, left: 0 }}
+                            />
+                        ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
+                            <video
+                                ref={(el) => { if (el) el.srcObject = localStream; }}
+                                autoPlay
+                                muted
+                                playsInline
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', position: 'absolute', top: 0, left: 0 }}
+                            />
+                        ) : userData?.photoURL ? (
+                            <img src={userData.photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
+                        ) : (
+                            <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
+                                {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
+                            </div>
+                        )}
 
-                {/* Local User Card */}
-                <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
-                    {screenStream ? (
-                        <video
-                            ref={(el) => { if (el) el.srcObject = screenStream; }}
-                            autoPlay
-                            muted
-                            playsInline
-                            style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'absolute', top: 0, left: 0 }}
-                        />
-                    ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
-                        <video
-                            ref={(el) => { if (el) el.srcObject = localStream; }}
-                            autoPlay
-                            muted
-                            playsInline
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', position: 'absolute', top: 0, left: 0 }}
-                        />
-                    ) : userData?.photoURL ? (
-                        <img src={userData.photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
-                    ) : (
-                        <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
-                            {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
+                        {/* Control Overlays */}
+                        <div className="video-card-controls" style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, opacity: 0, transition: 'opacity 0.2s', zIndex: 10 }}>
+                            <button onClick={() => setMaximizedPeerId('local')} className="control-btn" title="Büyüt">
+                                <FaBolt />
+                            </button>
+                            <button onClick={() => handleFullscreen('local-video-card')} className="control-btn" title="Tam Ekran">
+                                <FaDesktop />
+                            </button>
                         </div>
-                    )}
-                    <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
-                        <span style={{ fontWeight: 600 }}>{userData?.displayName || 'Sen'} (Sen)</span>
-                        {!isMicOn && <FaMicrophoneSlash style={{ color: 'var(--danger)' }} />}
+
+                        <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
+                            <span style={{ fontWeight: 600 }}>{userData?.displayName || 'Sen'} (Sen)</span>
+                            {!isMicOn && <FaMicrophoneSlash style={{ color: 'var(--danger)' }} />}
+                        </div>
+                    </div>
+
+                    {/* Remote Participants */}
+                    {Array.from(peerNames.entries()).map(([peerId, name]) => (
+                        <RemoteParticipant
+                            key={peerId}
+                            peerId={peerId}
+                            stream={peers.get(peerId)}
+                            name={name}
+                            isGameMode={isGameMode}
+                            globalSensitivity={sensitivity}
+                            isDeafened={isDeafened}
+                            db={db}
+                            onMaximize={() => setMaximizedPeerId(peerId)}
+                            onFullscreen={() => handleFullscreen(`peer-card-${peerId}`)}
+                        />
+                    ))}
+                </div>
+            ) : (
+                <div className="focused-view" style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                    <div id={maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`} style={{ width: '100%', maxWidth: '1200px', aspectRatio: '16/9', background: 'var(--bg-secondary)', borderRadius: 16, overflow: 'hidden', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+                        <div className="focused-content" style={{ width: '100%', height: '100%', transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}>
+                            {maximizedPeerId === 'local' ? (
+                                <>
+                                    {screenStream ? (
+                                        <video ref={(el) => { if (el) el.srcObject = screenStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
+                                        <video ref={(el) => { if (el) el.srcObject = localStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+                                    ) : (
+                                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            {userData?.photoURL ? (
+                                                <img src={userData.photoURL} alt="" className="avatar" style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover' }} />
+                                            ) : (
+                                                <div className="avatar" style={{ width: 120, height: 120, fontSize: 48 }}>
+                                                    {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <RemoteParticipant
+                                    peerId={maximizedPeerId}
+                                    stream={peers.get(maximizedPeerId)}
+                                    name={peerNames.get(maximizedPeerId) || ''}
+                                    isGameMode={isGameMode}
+                                    globalSensitivity={sensitivity}
+                                    isDeafened={isDeafened}
+                                    db={db}
+                                    isMaximized={true}
+                                />
+                            )}
+                        </div>
+
+                        {/* Controls */}
+                        <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 12, zIndex: 20 }}>
+                            <button onClick={() => setRotation(r => r + 90)} className="control-btn" style={{ padding: '10px 15px' }} title="Döndür">
+                                Döndür
+                            </button>
+                            <button onClick={() => handleFullscreen(maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`)} className="control-btn" style={{ padding: '10px 15px' }} title="Tam Ekran">
+                                Tam Ekran
+                            </button>
+                            <button onClick={() => { setMaximizedPeerId(null); setRotation(0); }} className="control-btn" style={{ padding: '10px 15px', background: 'rgba(255,0,0,0.3)' }} title="Kapat">
+                                Kapat
+                            </button>
+                        </div>
+
+                        <div style={{ position: 'absolute', bottom: 20, left: 20, background: 'rgba(0,0,0,0.6)', padding: '10px 20px', borderRadius: 8 }}>
+                            <span style={{ fontWeight: 600, fontSize: 18 }}>{maximizedPeerId === 'local' ? (userData?.displayName || 'Sen') : (peerNames.get(maximizedPeerId) || '')}</span>
+                        </div>
                     </div>
                 </div>
-
-                {/* Remote Participants */}
-                {Array.from(peerNames.entries()).map(([peerId, name]) => (
-                    <RemoteParticipant
-                        key={peerId}
-                        peerId={peerId}
-                        stream={peers.get(peerId)}
-                        name={name}
-                        isGameMode={isGameMode}
-                        globalSensitivity={sensitivity}
-                        isDeafened={isDeafened}
-                        db={db}
-                    />
-                ))}
-            </div>
+            )}
 
             <div className="room-controls" style={{
                 height: 80,
                 background: 'var(--bg-tertiary)',
                 borderRadius: '12px 12px 0 0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 20,
                 ...(window.innerWidth <= 768 ? {
                     position: 'fixed',
                     bottom: 0,
@@ -299,9 +407,12 @@ interface RemoteParticipantProps {
     globalSensitivity: number;
     isDeafened: boolean;
     db: any;
+    onMaximize?: () => void;
+    onFullscreen?: () => void;
+    isMaximized?: boolean;
 }
 
-function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity, isDeafened, db }: RemoteParticipantProps) {
+function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity, isDeafened, db, onMaximize, onFullscreen, isMaximized }: RemoteParticipantProps) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -425,7 +536,11 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
     }, [stream, globalSensitivity]);
 
     return (
-        <div className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
+        <div
+            id={`peer-card-${peerId}`}
+            className={`speaker-card ${isSpeaking ? 'speaking' : ''}`}
+            style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}
+        >
             <audio ref={audioRef} autoPlay />
             {hasVideo ? (
                 <video
@@ -443,10 +558,23 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
                     onError={(e) => console.error(`[VoiceRoom] Video Error ${peerId}`, e)}
                 />
             ) : photoURL ? (
-                <img src={photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
+                <img src={photoURL} alt="" className="avatar" style={{ width: isMaximized ? 120 : 80, height: isMaximized ? 120 : 80, borderRadius: '50%', objectFit: 'cover' }} />
             ) : (
-                <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>{displayName.charAt(0)}</div>
+                <div className="avatar" style={{ width: isMaximized ? 120 : 80, height: isMaximized ? 120 : 80, fontSize: isMaximized ? 48 : 32 }}>{displayName.charAt(0)}</div>
             )}
+
+            {/* Control Overlays */}
+            {!isMaximized && (
+                <div className="video-card-controls" style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, opacity: 0, transition: 'opacity 0.2s', zIndex: 10 }}>
+                    <button onClick={(e) => { e.stopPropagation(); onMaximize?.(); }} className="control-btn" title="Büyüt">
+                        <FaBolt />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); onFullscreen?.(); }} className="control-btn" title="Tam Ekran">
+                        <FaDesktop />
+                    </button>
+                </div>
+            )}
+
             <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
                 <span style={{ fontWeight: 600 }}>{displayName}</span>
             </div>
