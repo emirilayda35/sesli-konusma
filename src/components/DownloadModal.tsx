@@ -1,6 +1,7 @@
 import React from 'react';
 import { FaWindows, FaApple, FaAndroid, FaTimes } from 'react-icons/fa';
-import '../styles/auth.css'; // Reusing auth styles or creating new ones if needed
+import '../styles/auth.css';
+import { useUI } from '../contexts/UIContext';
 
 interface DownloadModalProps {
     isOpen: boolean;
@@ -8,6 +9,8 @@ interface DownloadModalProps {
 }
 
 const DownloadModal: React.FC<DownloadModalProps> = ({ isOpen, onClose }) => {
+    const { showAlert } = useUI();
+
     if (!isOpen) return null;
 
     const handleDownload = (platform: string) => {
@@ -18,7 +21,7 @@ const DownloadModal: React.FC<DownloadModalProps> = ({ isOpen, onClose }) => {
         } else if (platform === 'Android') {
             downloadUrl = '/downloads/sesli-konusma-android.apk';
         } else {
-            alert(`${platform} sürümü çok yakında!`);
+            showAlert('Bilgi', `${platform} sürümü çok yakında!`);
             return;
         }
 

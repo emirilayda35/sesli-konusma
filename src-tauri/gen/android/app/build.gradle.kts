@@ -14,15 +14,23 @@ val tauriProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 35
+    compileSdk = 36
     namespace = "com.seslikonusma.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.seslikonusma.app"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        create("release") {
+            keyAlias = "seslikonusma"
+            keyPassword = "password123"
+            storeFile = file("release.jks")
+            storePassword = "password123"
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -38,6 +46,7 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))

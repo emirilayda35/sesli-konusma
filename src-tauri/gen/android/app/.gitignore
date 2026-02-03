@@ -4,9 +4,3 @@
 /tauri.build.gradle.kts
 /proguard-tauri.pro
 /tauri.properties
-
-/src-tauri/target/
-/public/downloads/
-*.exe
-*.apk
-node_modules/

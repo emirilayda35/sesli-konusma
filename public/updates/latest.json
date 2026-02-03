@@ -1,0 +1,11 @@
+{
+    "version": "0.0.3",
+    "notes": "Automatic Update",
+    "pub_date": "2026-02-03T12:36:31.581Z",
+    "platforms": {
+        "windows-x86_64": {
+            "signature": "",
+            "url": "https://sesli-konusma-web.vercel.app/updates/sesli_konusma_0.0.3_x64_en-US.nsis.zip"
+        }
+    }
+}

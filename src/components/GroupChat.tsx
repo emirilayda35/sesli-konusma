@@ -276,11 +276,17 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
     };
 
     return (
-        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'transparent' }}>
+        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'transparent' }}>
+            <style>{`
+                .messages-list {
+                    -webkit-overflow-scrolling: touch;
+                    touch-action: pan-y;
+                }
+            `}</style>
             <div className="chat-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     {onBack && (
-                        <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0 }}>
+                        <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0, background: 'rgba(255,255,255,0.1)', padding: '8px 12px', borderRadius: '8px', color: 'white' }}>
                             <FaChevronLeft />
                             <span>Geri</span>
                         </button>
@@ -294,7 +300,7 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
                     <FaVolumeUp /> SESLİ KANAL
                 </button>
             </div>
-            <div className="messages-list" style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="messages-list" style={{ flex: '1 1 0', overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {messages.map(msg => {
                     const profile = memberProfiles[msg.senderId];
                     const isOwn = msg.senderId === currentUser?.uid;
@@ -364,23 +370,32 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
                 <div ref={scrollRef} />
             </div>
 
-            <div className="chat-input-wrapper" style={{ padding: '20px', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Input Form */}
+            <form
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    if (inputText.trim()) {
+                        playSound('click');
+                        handleSendText();
+                    }
+                }}
+                className="chat-input-wrapper"
+                style={{ padding: '20px', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', gap: '10px' }}
+            >
                 <input
                     type="text"
                     className="settings-input"
-                    style={{ margin: 0, borderRadius: '8px' }}
+                    style={{ margin: 0, borderRadius: '8px', flex: 1 }}
                     placeholder="Bir mesaj yaz..."
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyPress={(e) => {
-                        if (e.key === 'Enter') {
-                            playSound('click');
-                            handleSendText();
-                        }
+                        // Keep legacy handler just in case, but form submit should handle it
                     }}
                 />
 
                 <button
+                    type="button"
                     onClick={() => {
                         playSound('click');
                         isRecording ? stopRecording() : startRecording();
@@ -395,10 +410,7 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
                 </button>
 
                 <button
-                    onClick={() => {
-                        playSound('click');
-                        handleSendText();
-                    }}
+                    type="submit"
                     style={{
                         width: '40px', height: '40px', borderRadius: '8px', border: 'none',
                         background: 'var(--brand)', color: 'white', cursor: 'pointer',
@@ -407,7 +419,7 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
                 >
                     <FaPaperPlane />
                 </button>
-            </div>
+            </form>
 
             {contextMenu && (
                 <UserContextMenu

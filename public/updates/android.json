@@ -1,0 +1,10 @@
+{
+    "version": "0.0.3",
+    "notes": "Update via App",
+    "pub_date": "2026-02-03T12:36:31.599Z",
+    "platforms": {
+        "android": {
+            "url": "https://sesli-konusma-web.vercel.app/updates/sesli_konusma_0.0.3.apk"
+        }
+    }
+}

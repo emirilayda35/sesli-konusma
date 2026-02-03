@@ -12,13 +12,13 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
 const SOURCES = [
     {
         name: 'Windows',
-        pattern: /.*_x64-setup\.exe$/i,
+        pattern: /sesli_konusma_.*_x64-setup\.exe$/i,
         searchDir: path.join(ROOT, 'src-tauri', 'target', 'release', 'bundle', 'nsis'),
         targetName: 'SesliKonusma_Setup.exe'
     },
     {
         name: 'Android',
-        pattern: /app-universal-release-unsigned\.apk$/,
+        pattern: /app-universal-release\.apk$/,
         searchDir: path.join(ROOT, 'src-tauri', 'gen', 'android', 'app', 'build', 'outputs', 'apk', 'universal', 'release'),
         targetName: 'sesli-konusma-android.apk'
     }

@@ -45,3 +45,7 @@ src-tauri/target/
 
 # OS
 .DS_Store
+
+# Security
+private.key
+updater_keys.txt

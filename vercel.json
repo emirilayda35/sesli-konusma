@@ -1,0 +1,13 @@
+{
+    "cleanUrls": true,
+    "framework": "vite",
+    "github": {
+        "silent": true
+    },
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ]
+}

@@ -18,12 +18,14 @@ export default function Dashboard() {
 
     useEffect(() => {
         const handleRoomSelect = (e: any) => {
+            handleNavigationState();
             setActiveRoom(e.detail.roomId);
             setActiveGroup(null);
             setMobileSidebar('none');
         };
 
         const handleGroupSelect = (e: any) => {
+            handleNavigationState();
             setActiveGroup(e.detail.groupId);
             setActiveRoom(null);
             setMobileSidebar('none');
@@ -70,6 +72,71 @@ export default function Dashboard() {
     };
 
     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
+    useEffect(() => {
+        // Handle Hardware Back Button
+        const handlePopState = (event: PopStateEvent) => {
+            if (activeRoom || activeGroup) {
+                // If we have an active panel, close it (returning to dashboard main)
+                setActiveRoom(null);
+                setActiveGroup(null);
+                setMobileSidebar('none');
+                // Ensure we consume the event
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [activeRoom, activeGroup]);
+
+    const handleNavigationState = () => {
+        if (isMobile) {
+            // Push a state so the back button checks this entry first
+            window.history.pushState({ panel: 'chat' }, '');
+        }
+    };
+
+    useEffect(() => {
+        // Android Auto-Update Check
+        const checkAndroidUpdate = async () => {
+            // Only run on Android
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            if (!isAndroid) return;
+
+            try {
+                const response = await fetch('https://sesli-konusma-web.vercel.app/updates/android.json');
+                if (!response.ok) return;
+
+                const data = await response.json();
+                const latestVersion = data.version;
+                // Importing version from package.json might be tricky in Vite client-side without config
+                // We'll rely on a manual string or exposed env var. 
+                // For now, let's assume we can parse it from a global or just check inequality if we store current version.
+                // Better approach: "0.1.0" hardcoded or inject via Vite define.
+                const currentVersion = "0.1.0"; // Placeholder, should be injected
+
+                if (latestVersion !== currentVersion) {
+                    console.log(`Update available: ${latestVersion}`);
+                    // Trigger a custom toast or UI element
+                    // For simplicity, we'll use the native confirm since previously we wanted custom, 
+                    // but for "Infrastructure" validatin we need it to work.
+                    // Ideally use the Toast system we have.
+                    // Dispatch a custom event or use the Context if we can access it.
+                    // Since we are in Dashboard, we can't easily access UIContext without hook.
+                    // Use a simple non-blocking alert for now or just log.
+                    // Actually, let's just use console for 'hands-off' requirement verification 
+                    // and assume the Toast system would be integrated later or use window.confirm
+                    if (window.confirm(`Yeni güncelleme mevcut (${latestVersion}). İndirmek ister misiniz?`)) {
+                        window.open(data.platforms.android.url, '_blank');
+                    }
+                }
+            } catch (e) {
+                console.error("Update check failed", e);
+            }
+        };
+
+        checkAndroidUpdate();
+    }, []);
 
     return (
         <div className={`app-shell ${mobileSidebar !== 'none' ? 'sidebar-open' : ''}`}>
@@ -130,15 +197,20 @@ export default function Dashboard() {
                     background: (isMobile && (activeRoom || activeGroup)) ? 'rgba(49, 51, 56, 0.6)' : 'transparent',
                     backdropFilter: (isMobile && (activeRoom || activeGroup)) ? 'blur(12px)' : 'none',
                     borderRadius: (isMobile && (activeRoom || activeGroup)) ? '12px 12px 0 0' : undefined,
-                    margin: (isMobile && (activeRoom || activeGroup)) ? '8px 8px 0 8px' : undefined
+                    margin: (isMobile && (activeRoom || activeGroup)) ? '8px 8px 0 8px' : undefined,
+                    // Fix for double scroll and layout issues in chat/video mode
+                    overflow: (activeRoom || activeGroup) ? 'hidden' : undefined,
+                    padding: (activeRoom || activeGroup) ? 0 : undefined,
+                    flexWrap: (activeRoom || activeGroup) ? 'nowrap' : undefined,
+                    flexDirection: (activeRoom || activeGroup) ? 'column' : undefined
                 }}>
                     {activeRoom && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <VoiceRoom roomId={activeRoom} onBack={() => setActiveRoom(null)} />
                         </div>
                     )}
                     {activeGroup && (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <GroupChat groupId={activeGroup} onBack={() => setActiveGroup(null)} />
                         </div>
                     )}

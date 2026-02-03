@@ -682,6 +682,11 @@ div:hover>.message-delete-btn {
     .main-header {
         justify-content: space-between;
         padding: 0 12px;
+        padding-top: calc(8px + env(safe-area-inset-top, 24px));
+        /* Fallback to 24px status bar if env fails */
+        height: auto;
+        min-height: 56px;
+        /* Increased height to accommodate padding */
     }
 
     .main-content {
@@ -752,19 +757,20 @@ div:hover>.message-delete-btn {
     transform: translateX(-2px);
 }
 
-/* Sticky Headers */
+/* Sticky Headers - Disabled for Flex Layout */
 .chat-header,
 .voice-header {
-    position: sticky;
-    top: 0;
+    width: 100%;
     z-index: 100;
-    padding: 10px 20px;
+    padding: 12px 16px;
+    padding-top: calc(12px + env(safe-area-inset-top));
     border-bottom: 1px solid var(--bg-accent);
     display: flex;
     justify-content: space-between;
     align-items: center;
     background: var(--bg-secondary);
-    min-height: 48px;
+    min-height: auto;
+    flex-shrink: 0;
 }
 
 .voice-header {

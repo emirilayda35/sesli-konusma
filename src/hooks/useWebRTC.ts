@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useUI } from '../contexts/UIContext';
 import {
     collection,
     doc,
@@ -18,6 +19,7 @@ const servers = {
 };
 
 export function useWebRTC(roomId: string, userId: string, userName: string, db: any) {
+    const { showAlert } = useUI();
     const [peers, setPeers] = useState<Map<string, MediaStream>>(new Map());
     const [peerNames, setPeerNames] = useState<Map<string, string>>(new Map());
     const [isCameraOn, setIsCameraOn] = useState(false);
@@ -110,7 +112,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             } catch (err: any) {
                 console.error("[WEBRTC_DEBUG] Error getting audio:", err);
                 if (err.name === 'NotReadableError') {
-                    alert("Mikrofon kullanımda! Lütfen diğer uygulamaları kapatın.");
+                    showAlert("Hata", "Mikrofon kullanımda! Lütfen diğer uygulamaları kapatın.");
                 }
             }
         }
@@ -178,7 +180,7 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 console.error("[WEBRTC_DEBUG] Error getting video:", err);
                 setIsCameraOn(false); // Reset UI state
                 if (err.name === 'NotReadableError' || err.message?.includes('Device in use')) {
-                    alert("Kamera kullanımda! Lütfen diğer uygulamaları (Zoom, Skype vb.) kapatıp sayfayı yenileyin.");
+                    showAlert("Hata", "Kamera kullanımda! Lütfen diğer uygulamaları (Zoom, Skype vb.) kapatıp sayfayı yenileyin.");
                 }
             }
         }
@@ -526,31 +528,27 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             try {
                 const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-                // Desktop constraints: Request audio
+                if (isMobile) {
+                    showAlert("Bilgi", "Mobil cihazlarda ekran paylaşımı şu an desteklenmemektedir.");
+                    return;
+                }
+
+                // Desktop constraints: Simple video only to ensure compatibility on Windows/Web
                 const desktopConstraints: any = {
                     video: { cursor: "always" },
                     audio: {
-                        echoCancellation: true,
-                        noiseSuppression: false, // Don't suppress music/videos
-                        autoGainControl: false,
-                        suppressLocalAudioPlayback: false
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
                     }
                 };
 
-                // Mobile constraints: Minimal video only (mobile browsers mostly fail if audio is true or constraints are complex)
-                const mobileConstraints = { video: true };
-
                 let stream;
-                if (isMobile) {
-                    console.log("[WEBRTC_DEBUG] Mobile detected, using restricted constraints");
-                    stream = await navigator.mediaDevices.getDisplayMedia(mobileConstraints);
-                } else {
-                    try {
-                        stream = await navigator.mediaDevices.getDisplayMedia(desktopConstraints);
-                    } catch (e) {
-                        console.warn("[WEBRTC_DEBUG] Complex constraints failed, trying simple", e);
-                        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-                    }
+                try {
+                    stream = await navigator.mediaDevices.getDisplayMedia(desktopConstraints);
+                } catch (e) {
+                    console.warn("[WEBRTC_DEBUG] Audio constraints failed, trying video only", e);
+                    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
                 }
 
                 setScreenStream(stream);
@@ -563,9 +561,9 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
             } catch (err) {
                 console.error("Screen share error:", err);
                 if ((err as any).name === 'NotAllowedError') {
-                    // Ignore, user cancelled
+                    // Ignore
                 } else {
-                    alert("Ekran paylaşımı başlatılamadı. Mobil cihazlarda 'Ekran Kaydı' izni kapalı olabilir veya tarayıcınız bu özelliği kısıtlıyor olabilir.");
+                    showAlert("Hata", "Ekran paylaşımı başlatılamadı.");
                 }
             }
         }
