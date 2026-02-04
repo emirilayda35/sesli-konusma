@@ -113,7 +113,8 @@ export default function Dashboard() {
                 // We'll rely on a manual string or exposed env var. 
                 // For now, let's assume we can parse it from a global or just check inequality if we store current version.
                 // Better approach: "0.1.0" hardcoded or inject via Vite define.
-                const currentVersion = "0.1.0"; // Placeholder, should be injected
+                // @ts-ignore
+                const currentVersion = __APP_VERSION__;
 
                 if (latestVersion !== currentVersion) {
                     console.log(`Update available: ${latestVersion}`);

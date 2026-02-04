@@ -276,13 +276,7 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
     };
 
     return (
-        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'transparent' }}>
-            <style>{`
-                .messages-list {
-                    -webkit-overflow-scrolling: touch;
-                    touch-action: pan-y;
-                }
-            `}</style>
+        <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: 'transparent' }}>
             <div className="chat-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                     {onBack && (
@@ -300,7 +294,17 @@ export default function GroupChat({ groupId, onBack }: { groupId: string, onBack
                     <FaVolumeUp /> SESLİ KANAL
                 </button>
             </div>
-            <div className="messages-list" style={{ flex: '1 1 0', overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="messages-list" style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                touchAction: 'pan-y',
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain'
+            }}>
                 {messages.map(msg => {
                     const profile = memberProfiles[msg.senderId];
                     const isOwn = msg.senderId === currentUser?.uid;

@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
-import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash, FaChevronLeft, FaUserPlus, FaGamepad, FaSignOutAlt } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaBolt, FaDesktop, FaVideo, FaVideoSlash, FaChevronLeft, FaUserPlus, FaGamepad, FaSignOutAlt, FaPlayCircle } from 'react-icons/fa';
 import { useUI } from '../contexts/UIContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { useSound } from '../contexts/SoundContext';
 import { collection, onSnapshot, doc, deleteDoc, getDocs } from 'firebase/firestore';
+import type { WatchSession } from '../types/Watch';
+import WatchSessionModal from './Watch/WatchSessionModal';
+import YouTubePlayer from './Watch/YouTubePlayer';
+import ExternalPlayer from './Watch/ExternalPlayer';
+import { WatchService } from '../services/WatchService';
 
 interface VoiceRoomProps {
     roomId: string;
@@ -20,6 +25,9 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [sensitivity, setSensitivity] = useState(parseInt(localStorage.getItem('voice_sensitivity') || '10'));
     const { playSound } = useSound();
+
+    const [watchSession, setWatchSession] = useState<WatchSession | null>(null);
+    const [isWatchModalOpen, setIsWatchModalOpen] = useState(false);
 
     useEffect(() => {
         playSound('join');
@@ -72,6 +80,21 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
             window.removeEventListener('global_audio_state', handleGlobalAudio);
         };
     }, []);
+
+    // Watch Session Listener
+    useEffect(() => {
+        const unsub = onSnapshot(doc(db, 'rooms', roomId), (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.watchSession && data.watchSession.isActive) {
+                    setWatchSession(data.watchSession);
+                } else {
+                    setWatchSession(null);
+                }
+            }
+        });
+        return () => unsub();
+    }, [roomId, db]);
 
     // Auto-enable camera for video calls
     const cameraInitialized = useRef(false);
@@ -157,6 +180,12 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
         };
     }, []);
 
+    // Layout Calculation
+    // If Watch Session is active AND platform is YouTube, we split view.
+    // If External, we show a smaller banner/panel above grid? Or split view but with ExternalPlayer ui.
+
+    const showWatchPanel = !!watchSession;
+
     return (
         <div className="voice-room" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent' }}>
             <style>{`
@@ -210,134 +239,176 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     }
                 }
             `}</style>
-            <div className="voice-header" style={{ justifyContent: 'flex-start' }}>
+
+            <div className="voice-header" style={{ justifyContent: 'space-between', padding: '10px 20px' }}>
                 {onBack && (
                     <button className="back-button" onClick={() => { playSound('click'); onBack(); }} style={{ marginBottom: 0 }}>
                         <FaChevronLeft />
                         <span>Geri</span>
                     </button>
                 )}
-            </div>
-            {/* Grid View vs Focusing View */}
-            {!maximizedPeerId ? (
-                <div className="voice-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 450px))', gap: 16, padding: 20, justifyContent: 'center', alignContent: 'center' }}>
-                    {/* Local User Card */}
-                    <div
-                        id="local-video-card"
-                        className={`speaker-card ${isSpeaking ? 'speaking' : ''}`}
-                        style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}
-                    >
-                        {screenStream ? (
-                            <video
-                                ref={(el) => { if (el) el.srcObject = screenStream; }}
-                                autoPlay
-                                muted
-                                playsInline
-                                style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'absolute', top: 0, left: 0 }}
-                            />
-                        ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
-                            <video
-                                ref={(el) => { if (el) el.srcObject = localStream; }}
-                                autoPlay
-                                muted
-                                playsInline
-                                style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', position: 'absolute', top: 0, left: 0 }}
-                            />
-                        ) : userData?.photoURL ? (
-                            <img src={userData.photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
-                        ) : (
-                            <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
-                                {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
-                            </div>
+                {watchSession && (
+                    <div style={{
+                        background: 'rgba(50, 50, 50, 0.8)', padding: '5px 15px', borderRadius: 20,
+                        display: 'flex', alignItems: 'center', gap: 10
+                    }}>
+                        <span style={{ fontSize: '0.9rem', color: '#ccc' }}>Ortak İzleme: {watchSession.platform}</span>
+                        {(currentUser?.uid === watchSession.hostUid) && (
+                            <button onClick={() => WatchService.endSession(roomId)} style={{ background: 'red', border: 'none', color: 'white', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: '0.8rem' }}>Bitir</button>
                         )}
-
-                        {/* Control Overlays */}
-                        <div className="video-card-controls" style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, opacity: 0, transition: 'opacity 0.2s', zIndex: 10 }}>
-                            <button onClick={() => setMaximizedPeerId('local')} className="control-btn" title="Büyüt">
-                                <FaBolt />
-                            </button>
-                            <button onClick={() => handleFullscreen('local-video-card')} className="control-btn" title="Tam Ekran">
-                                <FaDesktop />
-                            </button>
-                        </div>
-
-                        <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
-                            <span style={{ fontWeight: 600 }}>{userData?.displayName || 'Sen'} (Sen)</span>
-                            {!isMicOn && <FaMicrophoneSlash style={{ color: 'var(--danger)' }} />}
-                        </div>
                     </div>
+                )}
+            </div>
 
-                    {/* Remote Participants */}
-                    {Array.from(peerNames.entries()).map(([peerId, name]) => (
-                        <RemoteParticipant
-                            key={peerId}
-                            peerId={peerId}
-                            stream={peers.get(peerId)}
-                            name={name}
-                            isGameMode={isGameMode}
-                            globalSensitivity={sensitivity}
-                            isDeafened={isDeafened}
-                            db={db}
-                            onMaximize={() => setMaximizedPeerId(peerId)}
-                            onFullscreen={() => handleFullscreen(`peer-card-${peerId}`)}
-                        />
-                    ))}
-                </div>
-            ) : (
-                <div className="focused-view" style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                    <div id={maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`} style={{ width: '100%', maxWidth: '1200px', aspectRatio: '16/9', background: 'var(--bg-secondary)', borderRadius: 16, overflow: 'hidden', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
-                        <div className="focused-content" style={{ width: '100%', height: '100%', transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}>
-                            {maximizedPeerId === 'local' ? (
-                                <>
-                                    {screenStream ? (
-                                        <video ref={(el) => { if (el) el.srcObject = screenStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                                    ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
-                                        <video ref={(el) => { if (el) el.srcObject = localStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
-                                    ) : (
-                                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            {userData?.photoURL ? (
-                                                <img src={userData.photoURL} alt="" className="avatar" style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover' }} />
-                                            ) : (
-                                                <div className="avatar" style={{ width: 120, height: 120, fontSize: 48 }}>
-                                                    {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
+            {/* Split View Container */}
+            <div className="room-content" style={{ flex: 1, display: 'flex', flexDirection: showWatchPanel ? (window.innerWidth < 768 ? 'column' : 'row') : 'column', overflow: 'hidden' }}>
+
+                {/* Watch Panel (Left/Top) */}
+                {showWatchPanel && (
+                    <div className="watch-panel" style={{
+                        flex: window.innerWidth < 768 ? '0 0 250px' : 2,
+                        background: 'black',
+                        position: 'relative',
+                        borderRight: window.innerWidth >= 768 ? '1px solid #333' : 'none',
+                        borderBottom: window.innerWidth < 768 ? '1px solid #333' : 'none'
+                    }}>
+                        {watchSession?.platform === 'youtube' ? (
+                            <YouTubePlayer roomId={roomId} watchSession={watchSession} />
+                        ) : watchSession && (
+                            <ExternalPlayer roomId={roomId} watchSession={watchSession} />
+                        )}
+                    </div>
+                )}
+
+                {/* Voice/Video Grid (Right/Bottom) */}
+                <div className="participants-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+
+                    {!maximizedPeerId ? (
+                        <div className="voice-grid" style={{
+                            flex: 1, display: 'grid',
+                            gridTemplateColumns: showWatchPanel ? 'repeat(auto-fit, minmax(200px, 1fr))' : 'repeat(auto-fit, minmax(350px, 450px))',
+                            gap: 16, padding: 20,
+                            justifyContent: 'center', alignContent: 'center', overflowY: 'auto'
+                        }}>
+                            {/* Local User Card */}
+                            <div
+                                id="local-video-card"
+                                className={`speaker-card ${isSpeaking ? 'speaking' : ''}`}
+                                style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}
+                            >
+                                {screenStream ? (
+                                    <video
+                                        ref={(el) => { if (el) el.srcObject = screenStream; }}
+                                        autoPlay
+                                        muted
+                                        playsInline
+                                        style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'absolute', top: 0, left: 0 }}
+                                    />
+                                ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
+                                    <video
+                                        ref={(el) => { if (el) el.srcObject = localStream; }}
+                                        autoPlay
+                                        muted
+                                        playsInline
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', position: 'absolute', top: 0, left: 0 }}
+                                    />
+                                ) : userData?.photoURL ? (
+                                    <img src={userData.photoURL} alt="" className="avatar" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover' }} />
+                                ) : (
+                                    <div className="avatar" style={{ width: 80, height: 80, fontSize: 32 }}>
+                                        {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
+                                    </div>
+                                )}
+
+                                {/* Control Overlays */}
+                                <div className="video-card-controls" style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, opacity: 0, transition: 'opacity 0.2s', zIndex: 10 }}>
+                                    <button onClick={() => setMaximizedPeerId('local')} className="control-btn" title="Büyüt">
+                                        <FaBolt />
+                                    </button>
+                                    <button onClick={() => handleFullscreen('local-video-card')} className="control-btn" title="Tam Ekran">
+                                        <FaDesktop />
+                                    </button>
+                                </div>
+
+                                <div style={{ position: 'absolute', bottom: 12, left: 12, display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '4px' }}>
+                                    <span style={{ fontWeight: 600 }}>{userData?.displayName || 'Sen'} (Sen)</span>
+                                    {!isMicOn && <FaMicrophoneSlash style={{ color: 'var(--danger)' }} />}
+                                </div>
+                            </div>
+
+                            {/* Remote Participants */}
+                            {Array.from(peerNames.entries()).map(([peerId, name]) => (
                                 <RemoteParticipant
-                                    peerId={maximizedPeerId}
-                                    stream={peers.get(maximizedPeerId)}
-                                    name={peerNames.get(maximizedPeerId) || ''}
+                                    key={peerId}
+                                    peerId={peerId}
+                                    stream={peers.get(peerId)}
+                                    name={name}
                                     isGameMode={isGameMode}
                                     globalSensitivity={sensitivity}
                                     isDeafened={isDeafened}
                                     db={db}
-                                    isMaximized={true}
+                                    onMaximize={() => setMaximizedPeerId(peerId)}
+                                    onFullscreen={() => handleFullscreen(`peer-card-${peerId}`)}
                                 />
-                            )}
+                            ))}
                         </div>
+                    ) : (
+                        <div className="focused-view" style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                            <div id={maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`} style={{ width: '100%', maxWidth: '1200px', aspectRatio: '16/9', background: 'var(--bg-secondary)', borderRadius: 16, overflow: 'hidden', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+                                <div className="focused-content" style={{ width: '100%', height: '100%', transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}>
+                                    {maximizedPeerId === 'local' ? (
+                                        <>
+                                            {screenStream ? (
+                                                <video ref={(el) => { if (el) el.srcObject = screenStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                            ) : (isCameraOn && localStream && localStream.getVideoTracks().length > 0) ? (
+                                                <video ref={(el) => { if (el) el.srcObject = localStream; }} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+                                            ) : (
+                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    {userData?.photoURL ? (
+                                                        <img src={userData.photoURL} alt="" className="avatar" style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <div className="avatar" style={{ width: 120, height: 120, fontSize: 48 }}>
+                                                            {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0) || 'S'}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <RemoteParticipant
+                                            peerId={maximizedPeerId}
+                                            stream={peers.get(maximizedPeerId)}
+                                            name={peerNames.get(maximizedPeerId) || ''}
+                                            isGameMode={isGameMode}
+                                            globalSensitivity={sensitivity}
+                                            isDeafened={isDeafened}
+                                            db={db}
+                                            isMaximized={true}
+                                        />
+                                    )}
+                                </div>
 
-                        {/* Controls */}
-                        <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 12, zIndex: 20 }}>
-                            <button onClick={() => setRotation(r => r + 90)} className="control-btn" style={{ padding: '10px 15px' }} title="Döndür">
-                                Döndür
-                            </button>
-                            <button onClick={() => handleFullscreen(maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`)} className="control-btn" style={{ padding: '10px 15px' }} title="Tam Ekran">
-                                Tam Ekran
-                            </button>
-                            <button onClick={() => { setMaximizedPeerId(null); setRotation(0); }} className="control-btn" style={{ padding: '10px 15px', background: 'rgba(255,0,0,0.3)' }} title="Kapat">
-                                Kapat
-                            </button>
-                        </div>
+                                {/* Controls */}
+                                <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', gap: 12, zIndex: 20 }}>
+                                    <button onClick={() => setRotation(r => r + 90)} className="control-btn" style={{ padding: '10px 15px' }} title="Döndür">
+                                        Döndür
+                                    </button>
+                                    <button onClick={() => handleFullscreen(maximizedPeerId === 'local' ? 'local-video-card' : `peer-card-${maximizedPeerId}`)} className="control-btn" style={{ padding: '10px 15px' }} title="Tam Ekran">
+                                        Tam Ekran
+                                    </button>
+                                    <button onClick={() => { setMaximizedPeerId(null); setRotation(0); }} className="control-btn" style={{ padding: '10px 15px', background: 'rgba(255,0,0,0.3)' }} title="Kapat">
+                                        Kapat
+                                    </button>
+                                </div>
 
-                        <div style={{ position: 'absolute', bottom: 20, left: 20, background: 'rgba(0,0,0,0.6)', padding: '10px 20px', borderRadius: 8 }}>
-                            <span style={{ fontWeight: 600, fontSize: 18 }}>{maximizedPeerId === 'local' ? (userData?.displayName || 'Sen') : (peerNames.get(maximizedPeerId) || '')}</span>
+                                <div style={{ position: 'absolute', bottom: 20, left: 20, background: 'rgba(0,0,0,0.6)', padding: '10px 20px', borderRadius: 8 }}>
+                                    <span style={{ fontWeight: 600, fontSize: 18 }}>{maximizedPeerId === 'local' ? (userData?.displayName || 'Sen') : (peerNames.get(maximizedPeerId) || '')}</span>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
-            )}
+            </div>
 
             <div className="room-controls-wrapper" style={{
                 position: 'fixed',
@@ -389,6 +460,19 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                         {isMicOn ? <FaMicrophone /> : <FaMicrophoneSlash />}
                     </button>
 
+                    {/* Watch Party Button */}
+                    <button
+                        onClick={() => { playSound('click'); setIsWatchModalOpen(true); }}
+                        className="control-btn-main"
+                        title={watchSession ? "Ortak İzlemeyi Yönet" : "Ortak İzleme Başlat"}
+                        style={{
+                            background: watchSession ? 'var(--brand)' : 'rgba(255,255,255,0.1)',
+                            color: 'white'
+                        }}
+                    >
+                        <FaPlayCircle />
+                    </button>
+
                     <button
                         onClick={() => { playSound('click'); toggleScreenShare(); }}
                         className="control-btn-main"
@@ -428,6 +512,8 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     <button
                         onClick={async () => {
                             playSound('click');
+                            // If leaving, we should check if we are host and end session?
+                            // For now, straightforward leave
                             const memberRef = doc(db, `rooms/${roomId}/members`, currentUser?.uid || 'anon');
                             await deleteDoc(memberRef);
                             const membersRef = collection(db, `rooms/${roomId}/members`);
@@ -445,6 +531,8 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     </button>
                 </div>
             </div>
+
+            {isWatchModalOpen && <WatchSessionModal roomId={roomId} onClose={() => setIsWatchModalOpen(false)} />}
         </div>
     );
 }
@@ -623,3 +711,4 @@ function RemoteParticipant({ peerId, stream, name, isGameMode, globalSensitivity
         </div>
     );
 }
+

@@ -22,8 +22,12 @@ rl.question('Select version bump type (patch/minor/major) [patch]: ', (answer) =
 
     try {
         // 1. Bump Version
-        console.log(`\n📦 Bumping version (${bumpType})...`);
-        execSync(`node scripts/bump-version.cjs ${bumpType}`, { stdio: 'inherit' });
+        if (process.argv[3] !== 'skip-bump') {
+            console.log(`\n📦 Bumping version (${bumpType})...`);
+            execSync(`node scripts/bump-version.cjs ${bumpType}`, { stdio: 'inherit' });
+        } else {
+            console.log(`\n📦 Skipping version bump... (Using current version)`);
+        }
 
         // Reload package.json to get new version
         const pkg = require('../package.json');
