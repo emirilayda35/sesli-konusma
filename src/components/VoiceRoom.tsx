@@ -200,7 +200,7 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                     border-radius: 8px;
                     cursor: pointer;
                     display: flex;
-                    alignItems: center;
+                    align-items: center;
                     backdrop-filter: blur(4px);
                     transition: all 0.2s ease;
                 }

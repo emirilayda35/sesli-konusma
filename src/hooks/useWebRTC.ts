@@ -518,11 +518,15 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
         }
     }
 
+    // --- Effect 3: Screen Share Management ---
+    useEffect(() => {
+        updateLocalAndPeers();
+    }, [screenStream]);
+
     async function toggleScreenShare() {
         if (screenStream) {
             screenStream.getTracks().forEach(t => t.stop());
             setScreenStream(null);
-            updateLocalAndPeers();
         } else {
             console.log("[WEBRTC_DEBUG] Requesting Screen Share...");
             try {
@@ -552,11 +556,9 @@ export function useWebRTC(roomId: string, userId: string, userName: string, db: 
                 }
 
                 setScreenStream(stream);
-                updateLocalAndPeers();
 
                 stream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
-                    updateLocalAndPeers();
                 };
             } catch (err) {
                 console.error("Screen share error:", err);
