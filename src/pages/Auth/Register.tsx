@@ -44,6 +44,18 @@ export default function Register() {
                 friends: []
             });
 
+            // --- SILENT LOGIN FOR MULTI-ACCOUNT MANAGMENT ---
+            // Create a dedicated session on the named app instance so the switcher doesn't fail
+            const { initializeApp, getApps } = await import('firebase/app');
+            const { getAuth, signInWithEmailAndPassword: signInNamed } = await import('firebase/auth');
+            const { firebaseConfig } = await import('../../firebase');
+
+            const name = `app-${user.uid}`;
+            const permanentApp = getApps().find(a => a.name === name) || initializeApp(firebaseConfig, name);
+            const permanentAuth = getAuth(permanentApp);
+            await signInNamed(permanentAuth, email, password);
+            // ------------------------------------------------
+
             // Auto switch to this new account and save it locally
             await switchAccount(user.uid);
 

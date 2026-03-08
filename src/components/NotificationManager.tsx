@@ -55,8 +55,8 @@ export default function NotificationManager() {
                 }
 
                 // If room deleted, remove incoming call
-                if (change.type === 'removed' && incomingCall?.roomId === change.doc.id) {
-                    setIncomingCall(null);
+                if (change.type === 'removed') {
+                    setIncomingCall(prev => prev?.roomId === change.doc.id ? null : prev);
                 }
             });
         });
@@ -139,18 +139,27 @@ export default function NotificationManager() {
         }
     };
 
-    const handleAcceptCall = () => {
+    const handleAcceptCall = async () => {
         if (!incomingCall) return;
         playSound('click');
-        window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: incomingCall.roomId } }));
-        setIncomingCall(null);
+        try {
+            await updateDoc(doc(db, 'rooms', incomingCall.roomId), { status: 'accepted' });
+            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: incomingCall.roomId } }));
+            setIncomingCall(null);
+        } catch (error) {
+            console.error('Error accepting call', error);
+        }
     };
 
     const handleDeclineCall = async () => {
         if (!incomingCall) return;
         playSound('click');
-        // Optionally remove yourself from participants or mark as declined
-        setIncomingCall(null);
+        try {
+            await updateDoc(doc(db, 'rooms', incomingCall.roomId), { status: 'declined' });
+            setIncomingCall(null);
+        } catch (error) {
+            console.error('Error declining call', error);
+        }
     };
 
     const handleToastClick = (toast: Toast) => {

@@ -15,14 +15,18 @@ import {
     deleteDoc,
     serverTimestamp,
     arrayUnion,
-    arrayRemove
+    arrayRemove,
+    getCountFromServer,
+    orderBy,
+    getDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { FaMicrophone, FaMicrophoneSlash, FaHeadphones, FaVolumeMute, FaCog, FaVolumeUp, FaPlus, FaCheck, FaTimes, FaUserPlus, FaSearch, FaSignOutAlt, FaUserFriends, FaUserCircle } from 'react-icons/fa';
+import { FaMicrophone, FaMicrophoneSlash, FaHeadphones, FaVolumeMute, FaCog, FaVolumeUp, FaPlus, FaCheck, FaTimes, FaUserPlus, FaSearch, FaSignOutAlt, FaUserFriends, FaUserCircle, FaPen } from 'react-icons/fa';
 import '../styles/layout.css';
 import { useClickOutside } from '../hooks/useClickOutside';
 import UserContextMenu from './UserContextMenu';
 import { useSound } from '../contexts/SoundContext';
+import { useLanguage } from '../contexts/LanguageContext';
 
 
 
@@ -43,9 +47,12 @@ export const RoomSidebar = ({
     onGroupSelect: (id: string | null) => void
 }) => {
     const { currentUser, userData } = useAuth();
-    const { showConfirm } = useUI();
-    const [rooms, setRooms] = useState<{ id: string, name: string }[]>([]);
-    const [groups, setGroups] = useState<{ id: string, name: string }[]>([]);
+    const { showConfirm, showAlert } = useUI();
+    const [rooms, setRooms] = useState<{ id: string, name: string, participants?: string[], activeUids?: string[], isGroupRoom?: boolean, groupId?: string }[]>([]);
+    const [groups, setGroups] = useState<{ id: string, name: string, members?: string[] }[]>([]);
+    const [groupMemberProfiles, setGroupMemberProfiles] = useState<Record<string, Record<string, { name: string, photoURL: string }>>>({});
+    const [roomMemberProfiles, setRoomMemberProfiles] = useState<Record<string, { name: string, photoURL: string }>>({});
+    const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
     const [isMicMuted, setIsMicMuted] = useState(false);
@@ -54,6 +61,7 @@ export const RoomSidebar = ({
     const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
     const accountMenuRef = useRef<HTMLDivElement>(null);
     const { playSound } = useSound();
+    const { t, language } = useLanguage();
 
     useClickOutside(accountMenuRef, () => {
         if (isAccountMenuOpen) setIsAccountMenuOpen(false);
@@ -115,13 +123,61 @@ export const RoomSidebar = ({
 
         if (!currentUser) return;
         const qGroups = query(collection(db, 'groups'), where('members', 'array-contains', currentUser.uid));
-        const unsubGroups = onSnapshot(qGroups, (snapshot) => {
+        const unsubGroups = onSnapshot(qGroups, async (snapshot) => {
             const groupList = snapshot.docs.map(doc => ({
                 id: doc.id,
                 name: doc.data().name,
-                owner: doc.data().owner
+                members: doc.data().members || [],
+                owner: doc.data().owner,
+                lastMessage: doc.data().lastMessage || null
             }));
             setGroups(groupList);
+
+            // Compute unread counts from lastMessage timestamp vs lastRead from localStorage
+            const lastReadMap: Record<string, number> = JSON.parse(localStorage.getItem('groupLastRead') || '{}');
+            const counts: Record<string, number> = {};
+
+            for (const g of groupList) {
+                const lm = g.lastMessage;
+                if (lm && lm.senderId !== currentUser?.uid) {
+                    const ts = lm.timestamp?.seconds ? lm.timestamp.seconds * 1000 : 0;
+                    const lastRead = lastReadMap[g.id] || 0;
+
+                    if (ts > lastRead) {
+                        // Initial fetch of the real count if we have a new message
+                        try {
+                            const messagesRef = collection(db, `groups/${g.id}/messages`);
+                            const qUnread = query(messagesRef, where('createdAt', '>', new Date(lastRead)));
+                            const snapshotCount = await getCountFromServer(qUnread);
+                            counts[g.id] = snapshotCount.data().count;
+                        } catch (e) {
+                            counts[g.id] = 1; // Fallback
+                        }
+                    } else {
+                        counts[g.id] = 0;
+                    }
+                }
+            }
+            setUnreadCounts(counts);
+
+            // Fetch profiles for each group's members (to show other user in sidebar)
+            const newProfiles: Record<string, Record<string, { name: string, photoURL: string }>> = {};
+            for (const g of groupList) {
+                if (g.members && g.members.length > 0) {
+                    try {
+                        const { getDocs, query: qry, collection: col, where: whr } = await import('firebase/firestore');
+                        const qm = qry(col(db, 'users'), whr('uid', 'in', g.members.slice(0, 10)));
+                        const snap = await getDocs(qm);
+                        const profiles: Record<string, { name: string, photoURL: string }> = {};
+                        snap.docs.forEach(d => {
+                            const data = d.data();
+                            profiles[data.uid] = { name: data.displayName || 'Unknown', photoURL: data.photoURL || '' };
+                        });
+                        newProfiles[g.id] = profiles;
+                    } catch (e) { /* ignore */ }
+                }
+            }
+            setGroupMemberProfiles(newProfiles);
         });
 
         return () => {
@@ -130,10 +186,56 @@ export const RoomSidebar = ({
         };
     }, [currentUser]);
 
+    // Fetch missing profiles for direct voice rooms
+    useEffect(() => {
+        if (!currentUser) return;
+        const missingUids = new Set<string>();
+        rooms.forEach((r: any) => {
+            if (r.activeUids) {
+                r.activeUids.forEach((uid: string) => {
+                    if (uid !== currentUser.uid && !roomMemberProfiles[uid]) {
+                        // Also check if it's already in a group member profile map to avoid redundant fetches
+                        const isFetchedInGroup = Object.values(groupMemberProfiles).some(gp => gp[uid]);
+                        if (!isFetchedInGroup) {
+                            missingUids.add(uid);
+                        }
+                    }
+                });
+            }
+        });
+
+
+
+        if (missingUids.size > 0) {
+            const fetchMissing = Array.from(missingUids).map(async (uid) => {
+                try {
+                    const s = await getDoc(doc(db, 'users', uid));
+                    if (s.exists()) {
+                        return { uid, name: s.data()?.displayName || 'Unknown', photoURL: s.data()?.photoURL || '' };
+                    }
+                } catch (e) { /* ignore */ }
+                return null;
+            });
+            Promise.all(fetchMissing).then(results => {
+                setRoomMemberProfiles(prev => {
+                    const next = { ...prev };
+                    let changed = false;
+                    for (const r of results) {
+                        if (r && !next[r.uid]) {
+                            next[r.uid] = { name: r.name, photoURL: r.photoURL };
+                            changed = true;
+                        }
+                    }
+                    return changed ? next : prev;
+                });
+            });
+        }
+    }, [rooms, currentUser, db, roomMemberProfiles]);
+
     const leaveGroup = async (groupId: string) => {
         showConfirm(
-            'Gruptan Ayrıl',
-            'Bu gruptan ayrılmak istediğinize emin misiniz?',
+            t('leave_group_confirm_title'),
+            t('leave_group_confirm_msg'),
             async () => {
                 try {
                     const groupRef = doc(db, 'groups', groupId);
@@ -145,15 +247,15 @@ export const RoomSidebar = ({
                     console.error('Error leaving group:', err);
                 }
             },
-            'Ayrıl',
+            t('leave'),
             true
         );
     };
 
     const deleteGroup = async (groupId: string) => {
         showConfirm(
-            'Grubu Sil',
-            'Bu grubu silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve tüm mesajlar silinecektir.',
+            t('delete_group_confirm_title'),
+            t('delete_group_confirm_msg'),
             async () => {
                 try {
                     await deleteDoc(doc(db, 'groups', groupId));
@@ -162,13 +264,27 @@ export const RoomSidebar = ({
                     console.error('Error deleting group:', err);
                 }
             },
-            'Sil',
+            t('close'),
             true
         );
     };
 
+    const handleRenameGroup = async (groupId: string, currentName: string) => {
+        const newName = prompt(t('rename_group_prompt'), currentName);
+        if (newName && newName.trim() !== '' && newName !== currentName) {
+            try {
+                await updateDoc(doc(db, 'groups', groupId), { name: newName.trim() });
+                playSound('click');
+            } catch (err) {
+                console.error('Error renaming group:', err);
+                if (showAlert) showAlert(t('error'), 'Grup ismi değiştirilemedi.');
+                else alert('Grup ismi değiştirilemedi.');
+            }
+        }
+    };
+
     const createRoom = async () => {
-        const name = prompt('Oda ismi girin:');
+        const name = prompt(t('create_room_prompt'));
         if (name) {
             await addDoc(collection(db, 'rooms'), { name, createdAt: Date.now() });
         }
@@ -210,27 +326,116 @@ export const RoomSidebar = ({
             <div className="sidebar-scrollable">
                 <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
-                        SESLİ KANALLAR
+                        {t('voice_channels')}
                     </GradientText>
                     <span onClick={createRoom} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
                 </div>
-                {rooms.map(room => (
-                    <div
-                        key={room.id}
-                        className={`room-item ${activeRoom === room.id ? 'active' : ''}`}
-                        onClick={() => {
-                            playSound('click');
-                            onRoomSelect(room.id);
-                            onGroupSelect(null);
-                        }}
-                    >
-                        <FaVolumeUp /> {room.name}
-                    </div>
-                ))}
+                {(() => {
+                    // Reusable "+N" badge with hover tooltip
+                    const PlusNBadge = ({ extra, extraProfiles }: { extra: number, extraProfiles: { uid: string, name: string, photoURL: string }[] }) => {
+                        const [hovered, setHovered] = React.useState(false);
+                        return (
+                            <span
+                                style={{ position: 'relative', flexShrink: 0 }}
+                                onMouseEnter={() => setHovered(true)}
+                                onMouseLeave={() => setHovered(false)}
+                            >
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'default' }}>+{extra}</span>
+                                {hovered && extraProfiles.length > 0 && (
+                                    <div style={{
+                                        position: 'absolute', left: '100%', top: 0, marginLeft: 6, zIndex: 9999,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--glass-border)',
+                                        borderRadius: 10, padding: '8px 10px', minWidth: 140,
+                                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                                        display: 'flex', flexDirection: 'column', gap: 6
+                                    }}>
+                                        {extraProfiles.map(p => (
+                                            <span key={p.uid} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                {p.photoURL ? (
+                                                    <img src={p.photoURL} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} />
+                                                ) : (
+                                                    <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'white', flexShrink: 0 }}>
+                                                        {p.name[0].toUpperCase()}
+                                                    </span>
+                                                )}
+                                                <span style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{p.name}</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                            </span>
+                        );
+                    };
+
+                    return rooms.map(room => {
+                        // Determine the participant list for this room
+                        // We now use room.activeUids which is synchronized in useWebRTC.ts
+                        // to show ONLY people actually in the call.
+                        const allUids = room.activeUids || [];
+                        const profilesMap = {
+                            ...roomMemberProfiles,
+                            ...(room.isGroupRoom && room.groupId ? (groupMemberProfiles[room.groupId] || {}) : {})
+                        };
+
+
+                        // For voice channels, we show ALL active participants (including self)
+                        // to ensure the room identity is clear even when alone.
+                        const shown = allUids.slice(0, 2);
+                        const extraUids = allUids.slice(2);
+                        const extraProfiles = extraUids.map((uid: string) => ({ uid, ...(profilesMap[uid] || { name: uid, photoURL: '' }) }));
+
+
+                        return (
+                            <div
+                                key={room.id}
+                                className={`room-item ${activeRoom === room.id ? 'active' : ''}`}
+                                onClick={() => {
+                                    playSound('click');
+                                    onRoomSelect(room.id);
+                                    onGroupSelect(null);
+                                }}
+                            >
+                                {allUids.length === 0 ? (
+
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', width: '100%' }}>
+                                        <FaVolumeUp style={{ flexShrink: 0 }} />
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.name}</span>
+                                    </span>
+                                ) : (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', width: '100%' }}>
+                                        {shown.map((uid: string) => {
+                                            // Resolve profile: use auth userData if it's the current user (not in roomMemberProfiles)
+                                            const profile = profilesMap[uid] || (
+                                                uid === currentUser?.uid
+                                                    ? { name: userData?.displayName || (language === 'tr' ? 'Sen' : language === 'en' ? 'You' : 'Du'), photoURL: userData?.photoURL || '' }
+                                                    : null
+                                            );
+                                            if (!profile) return null;
+
+                                            return (
+                                                <span key={uid} style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, maxWidth: '90px', overflow: 'hidden' }}>
+                                                    {profile.photoURL ? (
+                                                        <img src={profile.photoURL} alt="" style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0 }} />
+                                                    ) : (
+                                                        <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', flexShrink: 0, color: 'white' }}>
+                                                            {profile.name[0].toUpperCase()}
+                                                        </span>
+                                                    )}
+                                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{profile.name}</span>
+                                                </span>
+                                            );
+                                        })}
+                                        {extraUids.length > 0 && <PlusNBadge extra={extraUids.length} extraProfiles={extraProfiles} />}
+                                    </span>
+                                )}
+                            </div>
+                        );
+                    });
+                })()}
 
                 <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' }}>
                     <GradientText showBorder={false} animationSpeed={12} className="sidebar-cat-label">
-                        MESAJ GRUPLARI
+                        {t('message_groups')}
                     </GradientText>
                     <span onClick={() => setIsCreateGroupOpen(true)} style={{ cursor: 'pointer' }}><FaPlus size={12} /></span>
                 </div>
@@ -242,22 +447,77 @@ export const RoomSidebar = ({
                             playSound('click');
                             onGroupSelect(group.id);
                             onRoomSelect(null);
+                            // Mark group as read
+                            const lastReadMap = JSON.parse(localStorage.getItem('groupLastRead') || '{}');
+                            lastReadMap[group.id] = Date.now();
+                            localStorage.setItem('groupLastRead', JSON.stringify(lastReadMap));
+                            setUnreadCounts(prev => ({ ...prev, [group.id]: 0 }));
                         }}
                     >
-                        <FaPlus size={10} style={{ color: 'var(--text-muted)', marginRight: '4px' }} />
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            {(() => {
+                                const profiles = groupMemberProfiles[group.id] || {};
+                                const otherUids = ((group as any).members as string[] || []).filter((uid: string) => uid !== currentUser?.uid);
+                                if (otherUids.length === 0) return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>;
+                                const shown = otherUids.slice(0, 2);
+                                const extraUids = otherUids.slice(2);
+                                const PlusNBadge = ({ extra, xProfiles }: { extra: number, xProfiles: { uid: string, name: string, photoURL: string }[] }) => {
+                                    const [hovered, setHovered] = React.useState(false);
+                                    return (
+                                        <span style={{ position: 'relative', flexShrink: 0 }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'default' }}>+{extra}</span>
+                                            {hovered && xProfiles.length > 0 && (
+                                                <div style={{ position: 'absolute', left: '100%', top: 0, marginLeft: 6, zIndex: 9999, background: 'var(--bg-secondary)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '8px 10px', minWidth: 140, boxShadow: '0 4px 20px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                    {xProfiles.map(p => (
+                                                        <span key={p.uid} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            {p.photoURL ? <img src={p.photoURL} alt="" style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0 }} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'white', flexShrink: 0 }}>{p.name[0].toUpperCase()}</span>}
+                                                            <span style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{p.name}</span>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </span>
+                                    );
+                                };
+                                return (
+                                    <>
+                                        {shown.map((uid: string) => {
+                                            const p = profiles[uid];
+                                            if (!p) return null;
+                                            return (
+                                                <span key={uid} style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, maxWidth: '90px', overflow: 'hidden' }}>
+                                                    {p.photoURL ? (
+                                                        <img src={p.photoURL} alt="" style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0 }} />
+                                                    ) : (
+                                                        <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', flexShrink: 0, color: 'white' }}>
+                                                            {p.name[0].toUpperCase()}
+                                                        </span>
+                                                    )}
+                                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{p.name}</span>
+                                                </span>
+                                            );
+                                        })}
+                                        {extraUids.length > 0 && <PlusNBadge extra={extraUids.length} xProfiles={extraUids.map(uid => ({ uid, ...(profiles[uid] || { name: uid, photoURL: '' }) }))} />}
+                                    </>
+                                );
+                            })()}
+                        </span>
 
-                        <button
-                            className="group-action-btn"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                joinGroupVoice(group.id, group.name);
-                            }}
-                            title="Ses Kanalına Katıl"
-                            style={{ marginRight: '4px', color: 'var(--brand)' }}
-                        >
-                            <FaVolumeUp size={12} />
-                        </button>
+                        {/* Unread badge */}
+                        {(unreadCounts[group.id] ?? 0) > 0 && activeGroup !== group.id && (
+                            <span style={{
+                                background: 'var(--danger)', color: 'white',
+                                borderRadius: '10px', minWidth: '18px', height: '18px',
+                                fontSize: '0.7rem', fontWeight: 700,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                padding: '0 5px', flexShrink: 0, marginLeft: '4px',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                            }}>
+                                {unreadCounts[group.id] > 99 ? '99+' : unreadCounts[group.id]}
+                            </span>
+                        )}
+
+
 
                         {(group as any).owner === currentUser?.uid ? (
                             <button
@@ -266,7 +526,7 @@ export const RoomSidebar = ({
                                     e.stopPropagation();
                                     deleteGroup(group.id);
                                 }}
-                                title="Grubu Sil"
+                                title={t('delete_group_confirm_title')}
                             >
                                 <FaTimes size={12} />
                             </button>
@@ -277,7 +537,7 @@ export const RoomSidebar = ({
                                     e.stopPropagation();
                                     leaveGroup(group.id);
                                 }}
-                                title="Gruptan Ayrıl"
+                                title={t('leave_group_confirm_title')}
                             >
                                 <FaSignOutAlt size={12} />
                             </button>
@@ -287,20 +547,23 @@ export const RoomSidebar = ({
             </div>
 
             <footer className="user-footer">
-                <div className="avatar-wrapper" onClick={handleAvatarClick} style={{ cursor: 'pointer', position: 'relative' }}>
-                    {userData?.photoURL ? (
-                        <img src={userData.photoURL} alt="Avatar" className="avatar" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
-                    ) : (
-                        <div className="avatar">
-                            {currentUser?.displayName?.charAt(0) || currentUser?.email?.charAt(0)}
-                        </div>
-                    )}
-                    <div className="avatar-status-online" />
+                <div className="user-footer-top" onClick={handleAvatarClick} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
+                    <div className="avatar-wrapper" style={{ position: 'relative' }}>
+                        {userData?.photoURL ? (
+                            <img src={userData.photoURL} alt="Avatar" className="avatar" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' }} />
+                        ) : (
+                            <div className="avatar">
+                                {currentUser?.displayName?.charAt(0) || currentUser?.email?.charAt(0)}
+                            </div>
+                        )}
+                        <div className="avatar-status-online" />
+                    </div>
+                    <div className="user-info" style={{ flex: 1, overflow: 'hidden' }}>
+                        <div className="user-display-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.9rem', fontWeight: 600 }}>{userData?.displayName || 'Kullanıcı'}</div>
+                        <div className="user-status" style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.5)' }}>Çevrimiçi</div>
+                    </div>
                 </div>
-                <div className="user-info">
-                    <div className="user-display-name">{userData?.displayName || 'Kullanıcı'}</div>
-                    <div className="user-status">Çevrimiçi</div>
-                </div>
+
                 <div className="user-controls">
                     <div style={{ position: 'relative' }} ref={accountMenuRef}>
                         <button
@@ -311,7 +574,7 @@ export const RoomSidebar = ({
                                 setIsAccountMenuOpen(!isAccountMenuOpen);
                             }}
                         >
-                            <FaUserFriends />
+                            <FaUserCircle />
                         </button>
 
                         {isAccountMenuOpen && (
@@ -343,12 +606,15 @@ export const RoomSidebar = ({
                                     <div
                                         className="account-item add-account"
                                         onClick={() => {
+                                            playSound('click');
                                             setIsAccountMenuOpen(false);
                                             setIsAddAccountOpen(true);
                                         }}
                                     >
-                                        <div className="avatar add"><FaPlus /></div>
-                                        <span>Yeni Hesap Ekle</span>
+                                        <div className="avatar add-avatar"><FaPlus /></div>
+                                        <div className="acc-meta">
+                                            <div className="acc-name">Yeni hesap ekle</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -356,7 +622,7 @@ export const RoomSidebar = ({
                     </div>
                     <button
                         className={`control-btn ${isMicMuted ? 'muted' : ''}`}
-                        title={isMicMuted ? "Sesi Aç" : "Sesi Kapat"}
+                        title={isMicMuted ? "Mikrofonu Aç" : "Sesi Kapat"}
                         onClick={() => {
                             playSound('click');
                             toggleMic();
@@ -367,7 +633,7 @@ export const RoomSidebar = ({
                     </button>
                     <button
                         className={`control-btn ${isDeafened ? 'deafened' : ''}`}
-                        title={isDeafened ? "Sağırlaştırmayı Kapat" : "Sağırlaştır"}
+                        title={isDeafened ? "Sesi Aç" : "Kulaklığı Kapat"}
                         onClick={() => {
                             playSound('click');
                             toggleDeafen();
@@ -614,15 +880,16 @@ export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => v
             const roomRef = await addDoc(collection(db, 'rooms'), {
                 name: roomName,
                 type: 'voice',
+                status: 'calling',
                 participants: [currentUser?.uid, userId],
                 createdBy: currentUser?.uid,
                 createdAt: serverTimestamp()
             });
 
-            showAlert('Sesli Arama', `${targetUser?.displayName} ile sesli arama başlatıldı!`);
-
-            // Trigger room selection via custom event
-            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
+            // Trigger local dialing UI instead of entering room immediately
+            window.dispatchEvent(new CustomEvent('dialing_room', {
+                detail: { roomId: roomRef.id, type: 'voice', calleeName: targetUser?.displayName || 'Unknown', calleeId: userId }
+            }));
         } catch (error) {
             console.error('Voice call error:', error);
             showAlert('Hata', 'Sesli arama başlatılamadı.');
@@ -663,15 +930,16 @@ export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => v
             const roomRef = await addDoc(collection(db, 'rooms'), {
                 name: roomName,
                 type: 'video',
+                status: 'calling',
                 participants: [currentUser?.uid, userId],
                 createdBy: currentUser?.uid,
                 createdAt: serverTimestamp()
             });
 
-            showAlert('Görüntülü Arama', `${targetUser?.displayName} ile görüntülü arama başlatıldı!`);
-
-            // Trigger room selection via custom event
-            window.dispatchEvent(new CustomEvent('select_room', { detail: { roomId: roomRef.id } }));
+            // Trigger local dialing UI instead of entering room immediately
+            window.dispatchEvent(new CustomEvent('dialing_room', {
+                detail: { roomId: roomRef.id, type: 'video', calleeName: targetUser?.displayName || 'Unknown', calleeId: userId }
+            }));
         } catch (error) {
             console.error('Video call error:', error);
             showAlert('Hata', 'Görüntülü arama başlatılamadı.');
@@ -744,31 +1012,33 @@ export const UserPanel = ({ onGroupSelect }: { onGroupSelect?: (id: string) => v
                         ARKADAŞLAR — {friends.length}
                     </GradientText>
                 </div>
-                {friends.map(friend => (
-                    <div
-                        key={friend.uid}
-                        className="member-item"
-                        style={{ gap: '12px', cursor: 'pointer' }}
-                        onClick={(e) => handleUserClick(friend, e)}
-                    >
-                        <div className="avatar-wrapper">
-                            {friend.photoURL ? (
-                                <img src={friend.photoURL} alt="" className="avatar" style={{ width: 32, height: 32, borderRadius: '50%' }} />
-                            ) : (
-                                <div className="avatar" style={{ width: 32, height: 32 }}>{friend.displayName?.charAt(0) || '?'}</div>
-                            )}
-                        </div>
-                        <div className="user-info" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div className={`status-dot ${friend.isOnline ? 'online' : 'offline'}`} />
-                                <span className="user-display-name" style={{ fontSize: '14px' }}>{friend.displayName}</span>
+                {friends.map(friend => {
+                    const lastActiveTs = friend.lastActive?.seconds ? friend.lastActive.seconds * 1000 : friend.lastActive;
+                    const isTrulyOnline = friend.isOnline && lastActiveTs && (new Date().getTime() - lastActiveTs) < 60000;
+
+                    return (
+                        <div
+                            key={friend.uid}
+                            className="member-item"
+                            style={{ gap: '12px', cursor: 'pointer' }}
+                            onClick={(e) => handleUserClick(friend, e)}
+                        >
+                            <div className="avatar-wrapper">
+                                {friend.photoURL ? (
+                                    <img src={friend.photoURL} alt="" className="avatar" style={{ width: 32, height: 32, borderRadius: '50%' }} />
+                                ) : (
+                                    <div className="avatar" style={{ width: 32, height: 32 }}>{friend.displayName?.charAt(0) || '?'}</div>
+                                )}
                             </div>
-                            <span className="last-seen">
-                                {friend.isOnline ? 'Çevrimiçi' : formatLastActive(friend.lastActive)}
-                            </span>
+                            <div className="user-info" style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                <div className={`status-dot ${isTrulyOnline ? 'online' : 'offline'}`} style={{ flexShrink: 0 }} />
+                                <span className="user-display-name" style={{ fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {friend.displayName} <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.4)', fontWeight: 400 }}>({isTrulyOnline ? 'Çevrimiçi' : formatLastActive(friend.lastActive)})</span>
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             {contextMenu && (

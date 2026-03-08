@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { UIProvider } from './contexts/UIContext';
 import PrivateRoute from './components/PrivateRoute';
 import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
@@ -18,29 +17,24 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <UIProvider>
-        <AuthProvider>
-          <NotificationManager />
-          <Router>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route
-                path="/"
-                element={
-                  <PrivateRoute>
-                    <Dashboard />
-                  </PrivateRoute>
-                }
-              />
-              <Route path="*" element={<Navigate to="/" />} />
-            </Routes>
-          </Router>
-        </AuthProvider>
-      </UIProvider>
+      <AuthProvider>
+        <NotificationManager />
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <Dashboard />
+                </PrivateRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
     </ErrorBoundary>
   );
 }
-
-
-

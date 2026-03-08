@@ -24,21 +24,23 @@ export default function Login() {
             setError('');
             setLoading(true);
 
-            // 1. Initial login on helper app to get UID
-            const helperAppName = 'auth-helper';
-            const helperApp = getApps().find(a => a.name === helperAppName) || initializeApp(firebaseConfig, helperAppName);
-            const helperAuth = getAuth(helperApp);
-
-            const userCredential = await signInWithEmailAndPassword(helperAuth, email, password);
+            // 1. Authenticate directly with default app to get UID
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
             const uid = userCredential.user.uid;
 
-            // 2. Persistent login on named app
+            // --- SILENT LOGIN FOR MULTI-ACCOUNT MANAGMENT ---
+            // Create a dedicated session on the named app instance so the switcher doesn't fail
+            const { initializeApp, getApps } = await import('firebase/app');
+            const { getAuth, signInWithEmailAndPassword: signInNamed } = await import('firebase/auth');
+            const { firebaseConfig } = await import('../../firebase');
+
             const name = `app-${uid}`;
             const permanentApp = getApps().find(a => a.name === name) || initializeApp(firebaseConfig, name);
             const permanentAuth = getAuth(permanentApp);
-            await signInWithEmailAndPassword(permanentAuth, email, password);
+            await signInNamed(permanentAuth, email, password);
+            // ------------------------------------------------
 
-            // 3. Switch account in context
+            // 2. Switch account in context
             await switchAccount(uid);
 
             navigate('/');

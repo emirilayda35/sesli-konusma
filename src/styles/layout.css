@@ -1,13 +1,13 @@
 .app-shell {
     display: flex;
-    height: 100vh;
-    height: 100dvh;
-    width: 100%;
-    max-width: 100vw;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: transparent;
     color: var(--text-normal);
     overflow: hidden;
-    position: relative;
 }
 
 .rooms-container,
@@ -121,12 +121,15 @@
 
 /* User Profile Footer */
 .user-footer {
-    height: 52px;
+    height: auto;
+    min-height: 52px;
     background-color: transparent;
     border-top: 1px solid var(--glass-border);
-    padding: 0 8px;
+    padding: 12px 16px;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
     gap: 8px;
 }
 
@@ -169,6 +172,10 @@
     color: var(--interactive-hover);
 }
 
+.message-bubble-wrapper:hover .message-hover-toolbar {
+    opacity: 1 !important;
+}
+
 /* Main Area */
 .main-area {
     flex: 1;
@@ -177,6 +184,8 @@
     position: relative;
     z-index: 1;
     background: transparent;
+    min-height: 0;
+    min-width: 0;
 }
 
 .main-header {
@@ -186,6 +195,7 @@
     align-items: center;
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
     gap: 8px;
+    flex-shrink: 0 !important;
 }
 
 .main-content {
@@ -687,11 +697,17 @@ div:hover>.message-delete-btn {
         height: auto;
         min-height: 56px;
         /* Increased height to accommodate padding */
+        flex-shrink: 0 !important;
     }
 
     .main-content {
         padding: 12px;
         gap: 12px;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden !important;
+        min-height: 0;
     }
 
     .voice-grid {
@@ -726,6 +742,20 @@ div:hover>.message-delete-btn {
     .member-item,
     .control-btn {
         min-height: 44px;
+    }
+
+    .chat-header,
+    .voice-header {
+        padding-top: 8px;
+        padding-bottom: 8px;
+        background: transparent;
+        border-bottom: none;
+    }
+
+    /* Hide specific back buttons on mobile because we use the global nav header */
+    .chat-header .back-button,
+    .voice-header .back-button {
+        display: none !important;
     }
 }
 

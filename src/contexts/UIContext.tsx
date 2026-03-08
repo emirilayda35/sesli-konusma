@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, type ReactNode } from 'react';
 import GlobalModal from '../components/GlobalModal';
+import { useLanguage } from './LanguageContext';
 
 interface UIContextType {
     showAlert: (title: string, message: string) => void;
@@ -15,6 +16,7 @@ export const useUI = () => {
 };
 
 export const UIProvider = ({ children }: { children: ReactNode }) => {
+    const { t } = useLanguage();
     const [modal, setModal] = useState<{
         isOpen: boolean;
         type: 'alert' | 'confirm';
@@ -36,11 +38,11 @@ export const UIProvider = ({ children }: { children: ReactNode }) => {
             type: 'alert',
             title,
             message,
-            confirmText: 'Tamam'
+            confirmText: t('ok')
         });
     };
 
-    const showConfirm = (title: string, message: string, onConfirm: () => void, confirmText = 'Onayla', isDanger = false) => {
+    const showConfirm = (title: string, message: string, onConfirm: () => void, confirmText = t('confirm'), isDanger = false) => {
         setModal({
             isOpen: true,
             type: 'confirm',

@@ -7,6 +7,7 @@ import { useUI } from '../contexts/UIContext';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getCroppedImg } from '../utils/imageUtils';
 import { useSound } from '../contexts/SoundContext';
+import { useLanguage } from '../contexts/LanguageContext';
 import '../styles/settings.css';
 
 interface SettingsModalProps {
@@ -23,6 +24,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
     const [uploading, setUploading] = useState(false);
     const [uploadStatus, setUploadStatus] = useState<string>('');
     const { playSound, settings: soundSettings, updateSettings: updateSoundSettings } = useSound();
+    const { language, setLanguage, t } = useLanguage();
 
     // Username change states
     const [newDisplayName, setNewDisplayName] = useState(userData?.displayName || '');
@@ -93,11 +95,12 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 displayName: newDisplayName.trim()
             });
             setIsSavingName(false);
-            showAlert('Başarılı', 'Kullanıcı adı başarıyla güncellendi!');
+            showAlert(t('success'), 'Kullanıcı adı başarıyla güncellendi!');
         } catch (err: any) {
             console.error("Name update error:", err);
             setIsSavingName(false);
-            showAlert('Hata', `Kullanıcı adı güncellenirken bir hata oluştu: ${err.message}`);
+            setIsSavingName(false);
+            showAlert(t('error'), `Kullanıcı adı güncellenirken bir hata oluştu: ${err.message}`);
         }
     };
 
@@ -134,12 +137,13 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
             setUploading(false);
             setUploadStatus('');
             setImage(null);
-            showAlert('Başarılı', 'Profil resmi başarıyla güncellendi!');
+            showAlert(t('success'), 'Profil resmi başarıyla güncellendi!');
         } catch (err: any) {
             console.error("Upload error detail:", err);
             setUploading(false);
+            setUploading(false);
             setUploadStatus('');
-            showAlert('Hata', `Resim yüklenirken bir hata oluştu: ${err.message}`);
+            showAlert(t('error'), `Resim yüklenirken bir hata oluştu: ${err.message}`);
         }
     };
 
@@ -153,9 +157,9 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         <div className="settings-header">
                             <button className="back-button" onClick={onClose}>
                                 <FaChevronLeft size={16} />
-                                <span>Geri</span>
+                                <span>{t('back')}</span>
                             </button>
-                            <h2>Hesabım</h2>
+                            <h2>{t('my_account')}</h2>
                         </div>
                         <div className="settings-section">
                             <div className="account-profile-card">
@@ -173,7 +177,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                     )}
                                     <div className="avatar-overlay">
                                         <FaCamera />
-                                        <span>DEĞİŞTİR</span>
+                                        <span>{t('change_avatar')}</span>
                                     </div>
                                     {uploading && <div className="upload-spinner" />}
                                 </div>
@@ -191,13 +195,13 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                             </div>
 
                             <div className="settings-field" style={{ marginTop: '24px' }}>
-                                <label className="settings-label">KULLANICI ADI</label>
+                                <label className="settings-label">{t('username_label')}</label>
                                 <div style={{ display: 'flex', gap: '10px' }}>
                                     <input
                                         className="settings-input"
                                         value={newDisplayName}
                                         onChange={(e) => setNewDisplayName(e.target.value)}
-                                        placeholder="Kullanıcı adı girin"
+                                        placeholder={t('username_label')}
                                     />
                                     {newDisplayName !== userData?.displayName && (
                                         <button
@@ -206,13 +210,13 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                             onClick={handleSaveDisplayName}
                                             disabled={isSavingName}
                                         >
-                                            {isSavingName ? 'KAYDEDİLİYOR...' : 'KAYDET'}
+                                            {isSavingName ? t('saving') : t('save')}
                                         </button>
                                     )}
                                 </div>
                             </div>
                             <div className="settings-field">
-                                <label className="settings-label">E-POSTA</label>
+                                <label className="settings-label">{t('email_label')}</label>
                                 <input className="settings-input" value={currentUser?.email || ''} disabled style={{ opacity: 0.6 }} />
                             </div>
 
@@ -221,7 +225,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                 style={{ background: 'var(--danger)', color: 'white', cursor: 'pointer', fontWeight: 'bold', height: '40px', marginTop: '20px' }}
                                 onClick={logoutCurrent}
                             >
-                                Oturumu Kapat
+                                {t('logout')}
                             </button>
                         </div>
                     </>
@@ -232,21 +236,35 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         <div className="settings-header">
                             <button className="back-button" onClick={onClose}>
                                 <FaChevronLeft size={16} />
-                                <span>Geri</span>
+                                <span>{t('back')}</span>
                             </button>
-                            <h2>Görünüm</h2>
+                            <h2>{t('appearance')}</h2>
                         </div>
                         <div className="settings-section">
-                            <h4>TEMA</h4>
+                            <h4>{t('theme_label').toUpperCase()}</h4>
                             <div className="settings-field">
-                                <label className="settings-label">Renk Teması</label>
+                                <label className="settings-label">{t('theme_label')}</label>
                                 <select
                                     className="settings-select"
                                     value={settings.theme}
                                     onChange={(e) => updateSetting('theme', e.target.value)}
                                 >
-                                    <option value="dark">Koyu</option>
-                                    <option value="light">Açık</option>
+                                    <option value="dark">{t('theme_dark')}</option>
+                                    <option value="light">{t('theme_light')}</option>
+                                </select>
+                            </div>
+
+                            <h4 style={{ marginTop: '24px' }}>{t('language').toUpperCase()}</h4>
+                            <div className="settings-field">
+                                <label className="settings-label">{t('language')}</label>
+                                <select
+                                    className="settings-select"
+                                    value={language}
+                                    onChange={(e) => setLanguage(e.target.value as any)}
+                                >
+                                    <option value="tr">Türkçe</option>
+                                    <option value="en">English</option>
+                                    <option value="de">Deutsch</option>
                                 </select>
                             </div>
                         </div>
@@ -259,29 +277,29 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         <div className="settings-header">
                             <button className="back-button" onClick={onClose}>
                                 <FaChevronLeft size={16} />
-                                <span>Geri</span>
+                                <span>{t('back')}</span>
                             </button>
-                            <h2>Ses ve Görüntü</h2>
+                            <h2>{t('voice_video')}</h2>
                         </div>
 
                         <div className="settings-section">
-                            <h4>SES AYARLARI</h4>
+                            <h4>{t('voice_video').toUpperCase()}</h4>
 
                             <div className="settings-field">
-                                <label className="settings-label">Giriş Cihazı</label>
+                                <label className="settings-label">{t('input_device')}</label>
                                 <select
                                     className="settings-select"
                                     value={settings.inputId}
                                     onChange={(e) => updateSetting('inputId', e.target.value)}
                                 >
                                     {devices.filter(d => d.kind === 'audioinput').map(d => (
-                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Mikrofon ${d.deviceId.slice(0, 5)}`}</option>
+                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `${t('input_device')} ${d.deviceId.slice(0, 5)}`}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div className="settings-field">
-                                <label className="settings-label">Giriş Ses Seviyesi</label>
+                                <label className="settings-label">{t('input_volume')}</label>
                                 <div className="settings-slider-wrapper">
                                     <input
                                         type="range"
@@ -294,20 +312,20 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                             </div>
 
                             <div className="settings-field">
-                                <label className="settings-label">Çıkış Cihazı</label>
+                                <label className="settings-label">{t('output_device')}</label>
                                 <select
                                     className="settings-select"
                                     value={settings.outputId}
                                     onChange={(e) => updateSetting('outputId', e.target.value)}
                                 >
                                     {devices.filter(d => d.kind === 'audiooutput').map(d => (
-                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Hoparlör ${d.deviceId.slice(0, 5)}`}</option>
+                                        <option key={d.deviceId} value={d.deviceId}>{d.label || `${t('output_device')} ${d.deviceId.slice(0, 5)}`}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div className="settings-field">
-                                <label className="settings-label">Çıkış Ses Seviyesi</label>
+                                <label className="settings-label">{t('output_volume')}</label>
                                 <div className="settings-slider-wrapper">
                                     <input
                                         type="range"
@@ -321,12 +339,12 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         </div>
 
                         <div className="settings-section">
-                            <h4>GELİŞMİŞ</h4>
+                            <h4>{t('advanced')}</h4>
 
                             <div className="settings-toggle-wrapper">
                                 <div>
-                                    <div style={{ color: 'var(--text-header)' }}>Yankı Engelleme</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sesin geri dönmesini engeller.</div>
+                                    <div style={{ color: 'var(--text-header)' }}>{t('echo_cancellation')}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('echo_cancellation')}</div>
                                 </div>
                                 <div
                                     className={`settings-toggle ${settings.echoCancellation ? 'on' : ''}`}
@@ -339,8 +357,8 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
 
                             <div className="settings-toggle-wrapper">
                                 <div>
-                                    <div style={{ color: 'var(--text-header)' }}>Gürültü Azaltma</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Arka plan gürültülerini filtreler.</div>
+                                    <div style={{ color: 'var(--text-header)' }}>{t('noise_suppression')}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('noise_suppression')}</div>
                                 </div>
                                 <div
                                     className={`settings-toggle ${settings.noiseSuppression ? 'on' : ''}`}
@@ -352,7 +370,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                             </div>
 
                             <div className="settings-field" style={{ marginTop: 20 }}>
-                                <label className="settings-label">Ses Hassasiyeti</label>
+                                <label className="settings-label">{t('sensitivity')}</label>
                                 <div className="settings-slider-wrapper">
                                     <input
                                         type="range"
@@ -367,11 +385,11 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         </div>
 
                         <div className="settings-section">
-                            <h4>BİLDİRİMLER VE SESLER</h4>
+                            <h4>{t('notifications_sounds')}</h4>
                             <div className="settings-toggle-wrapper">
                                 <div>
-                                    <div style={{ color: 'var(--text-header)' }}>Ses Efektleri</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Mesaj geldiğinde ve aramalarda ses çalar.</div>
+                                    <div style={{ color: 'var(--text-header)' }}>{t('sound_effects')}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('sound_effects')}</div>
                                 </div>
                                 <div
                                     className={`settings-toggle ${soundSettings.enabled ? 'on' : ''}`}
@@ -382,7 +400,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                 />
                             </div>
                             <div className="settings-field" style={{ marginTop: '12px' }}>
-                                <label className="settings-label">Efekt Ses Seviyesi</label>
+                                <label className="settings-label">{t('sound_effects')}</label>
                                 <div className="settings-slider-wrapper">
                                     <input
                                         type="range"
@@ -397,7 +415,7 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                         style={{ marginLeft: '10px', padding: '4px 12px', height: '28px', fontSize: '11px' }}
                                         onClick={() => playSound('click')}
                                     >
-                                        TEST
+                                        {t('test_btn')}
                                     </button>
                                 </div>
                             </div>
@@ -412,10 +430,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
             <div className="settings-overlay">
                 <div className="settings-sidebar">
                     <div className="settings-nav">
-                        <h3>Kullanıcı Ayarları</h3>
-                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('account'); }}>Hesabım</div>
-                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('voice'); }}>Ses ve Görüntü</div>
-                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('appearance'); }}>Görünüm</div>
+                        <h3>{t('user_settings')}</h3>
+                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('account'); }}>{t('my_account')}</div>
+                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('voice'); }}>{t('voice_video')}</div>
+                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('appearance'); }}>{t('appearance')}</div>
                     </div>
                 </div>
 
@@ -459,9 +477,9 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                             className="cropper-slider"
                         />
                         <div className="cropper-btns">
-                            <button className="btn-secondary" onClick={() => setImage(null)} disabled={uploading}>İPTAL</button>
+                            <button className="btn-secondary" onClick={() => setImage(null)} disabled={uploading}>{t('cancel')}</button>
                             <button className="btn-primary" onClick={handleAvatarUpload} disabled={uploading}>
-                                {uploading ? uploadStatus : 'UYGULA VE YÜKLE'}
+                                {uploading ? uploadStatus : t('save')}
                             </button>
                         </div>
                     </div>

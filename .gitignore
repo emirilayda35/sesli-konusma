@@ -49,3 +49,11 @@ src-tauri/target/
 # Security
 private.key
 updater_keys.txt
+
+*.apk
+*.exe
+*.msi
+*.zip
+
+
+public/downloads/*

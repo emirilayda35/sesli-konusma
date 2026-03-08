@@ -156,6 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setActiveUid(uid);
     };
 
+
     const logoutCurrent = async () => {
         if (!currentUser) return;
         const currentAuth = getAuthForUser(activeUid);
