@@ -701,89 +701,78 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
 
                 <header className="room-header-floating" style={{
                     position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 20px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0))',
-                    color: 'white'
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                    padding: isMobile ? '8px 12px' : '10px 20px',
+                    background: 'linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 100%)',
+                    color: 'white', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? '6px' : '0'
                 }}>
-                    <div className="room-info" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {/* LEFT: Back + Title */}
+                    <div className="room-info" style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 0 auto', minWidth: 0 }}>
                         {onBack && (
-                            <button className="back-btn" onClick={() => { playSound('click'); onBack(); }} title={t('back')} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', cursor: 'pointer' }}>
+                            <button className="back-btn" onClick={() => { playSound('click'); onBack(); }} title={t('back')} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: '36px', height: '36px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', cursor: 'pointer' }}>
                                 <FaChevronLeft />
                             </button>
                         )}
-                        <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{roomData?.name || t('loading')}</h2>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+                            <h2 style={{ margin: 0, fontSize: isMobile ? '0.95rem' : '1.1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isMobile ? '140px' : '300px' }}>{roomData?.name || t('loading')}</h2>
+                            {/* Timer under title on mobile */}
+                            {isMobile && isCallActive && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#43b581', boxShadow: '0 0 6px #43b581' }} />
+                                    <span style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', letterSpacing: '1px', color: 'rgba(255,255,255,0.85)' }}>{formatDuration(callDuration)}</span>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                    <div className="room-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        {isCallActive && (
-                            <div style={{
-                                background: 'rgba(0,0,0,0.4)',
-                                padding: '6px 14px',
-                                borderRadius: '20px',
-                                fontSize: '0.9rem',
-                                fontWeight: 600,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                color: 'white',
-                                border: '1px solid var(--glass-border)'
-                            }}>
+
+                    {/* RIGHT: Timer (desktop only) + Names + Invite + Chat */}
+                    <div className="room-actions" style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '10px', flexShrink: 0, flexWrap: 'nowrap' }}>
+                        {!isMobile && isCallActive && (
+                            <div style={{ background: 'rgba(0,0,0,0.4)', padding: '5px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', color: 'white', border: '1px solid var(--glass-border)' }}>
                                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#43b581', boxShadow: '0 0 8px #43b581', animation: 'pulse 2s infinite' }} />
                                 <span style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '1px' }}>{formatDuration(callDuration)}</span>
                             </div>
                         )}
 
-                        {/* Participant names: current user + all peers, max 2 + overflow */}
-                        {(() => {
+                        {/* Participant names */}
+                        {!isMobile && (() => {
                             const allNames = [userData?.displayName || t('you'), ...Array.from(peerNames.values())];
                             const shown = allNames.slice(0, 2);
                             const extra = allNames.length - 2;
                             return (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                                     {shown.map((name, i) => (
-                                        <span key={i} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: '20px', padding: '3px 10px', fontSize: '0.82rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap' }}>{name}</span>
+                                        <span key={i} style={{ background: 'rgba(255,255,255,0.1)', borderRadius: '20px', padding: '3px 10px', fontSize: '0.8rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap' }}>{name}</span>
                                     ))}
                                     {extra > 0 && (
-                                        <span style={{ background: 'rgba(255,255,255,0.08)', borderRadius: '20px', padding: '3px 10px', fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>+{extra} {t('people')}</span>
+                                        <span style={{ background: 'rgba(255,255,255,0.08)', borderRadius: '20px', padding: '3px 8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>+{extra}</span>
                                     )}
                                 </div>
                             );
                         })()}
 
+                        {/* Invite button — icon-only on mobile */}
                         <button
                             onClick={() => setIsInviteMenuOpen(true)}
                             className="action-btn"
                             title={t('invite')}
-                            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'white', cursor: 'pointer' }}
+                            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: isMobile ? '7px 9px' : '7px 12px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', cursor: 'pointer', whiteSpace: 'nowrap' }}
                         >
                             <FaUserPlus />
-                            <span>{t('invite')}</span>
+                            {!isMobile && <span>{t('invite')}</span>}
                         </button>
+
+                        {/* Chat button — icon-only on mobile */}
                         <button
                             className={`action-btn ${isChatOpen ? 'active' : ''}`}
                             onClick={() => setIsChatOpen(!isChatOpen)}
                             title={t('chat')}
-                            style={{ background: isChatOpen ? 'var(--brand)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'white', cursor: 'pointer', position: 'relative' }}
+                            style={{ background: isChatOpen ? 'var(--brand)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', padding: isMobile ? '7px 9px' : '7px 12px', display: 'flex', alignItems: 'center', gap: '6px', color: 'white', cursor: 'pointer', position: 'relative', whiteSpace: 'nowrap' }}
                         >
                             <FaComment />
-                            <span>{t('chat')}</span>
+                            {!isMobile && <span>{t('chat')}</span>}
                             {!isChatOpen && unreadMessages > 0 && (
-                                <span className="unread-dot" style={{
-                                    position: 'absolute',
-                                    top: -6,
-                                    right: -6,
-                                    background: 'var(--danger)',
-                                    color: 'white',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 'bold',
-                                    width: 20,
-                                    height: 20,
-                                    borderRadius: '50%',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-                                    border: '2px solid var(--bg-primary)'
-                                }}>{unreadMessages > 99 ? '99+' : unreadMessages}</span>
+                                <span className="unread-dot" style={{ position: 'absolute', top: -6, right: -6, background: 'var(--danger)', color: 'white', fontSize: '0.65rem', fontWeight: 'bold', width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 5px rgba(0,0,0,0.3)', border: '2px solid var(--bg-primary)' }}>{unreadMessages > 99 ? '99+' : unreadMessages}</span>
                             )}
                         </button>
                     </div>
@@ -981,10 +970,7 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                             <FaSync />
                         </button>
 
-                        <button className="control-btn settings" onClick={() => setIsExtraSettingsOpen(!isExtraSettingsOpen)} title={t('advanced')}
-                            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', width: '48px', height: '48px', borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
-                            <FaCog />
-                        </button>
+
 
                         <button className="control-btn leave" onClick={handleLeaveRoom} title={t('leave')}
                             style={{ background: 'var(--danger)', color: 'white', width: '48px', height: '48px', borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>

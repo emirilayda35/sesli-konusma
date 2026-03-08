@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
 
 interface SoundContextType {
     playSound: (soundName: 'click' | 'message_sent' | 'notification' | 'call_start' | 'join') => void;
@@ -16,6 +16,17 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const saved = localStorage.getItem('sound_settings');
         return saved ? JSON.parse(saved) : { enabled: true, volume: 0.5 };
     });
+    const audioCtxRef = useRef<AudioContext | null>(null);
+
+    const getCtx = (): AudioContext => {
+        if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+            audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        if (audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume();
+        }
+        return audioCtxRef.current;
+    };
 
     const updateSettings = (newSettings: Partial<{ enabled: boolean; volume: number }>) => {
         setSettings((prev: any) => {
@@ -25,31 +36,86 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
     };
 
+    // Helper: play a tone sequence
+    const playTone = useCallback((
+        notes: { freq: number; duration: number; type?: OscillatorType; delay?: number }[],
+        vol: number
+    ) => {
+        const ctx = getCtx();
+        notes.forEach(({ freq, duration, type = 'sine', delay = 0 }) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+
+            const t = ctx.currentTime + delay;
+            const attack = 0.01;
+            const release = Math.min(duration * 0.4, 0.06);
+
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(vol, t + attack);
+            gain.gain.setValueAtTime(vol, t + duration - release);
+            gain.gain.linearRampToValueAtTime(0, t + duration);
+
+            osc.start(t);
+            osc.stop(t + duration + 0.01);
+        });
+    }, []);
+
     const playSound = useCallback((soundName: string) => {
-        console.log(`[SoundContext] Attempting to play: ${soundName}`);
-        if (!settings.enabled) {
-            console.log(`[SoundContext] Sound is disabled in settings.`);
-            return;
-        }
+        if (!settings.enabled) return;
+        const vol = Math.min(1, Math.max(0, settings.volume));
 
         try {
-            const audio = new Audio(`/assets/sounds/${soundName}.mp3`);
-            audio.volume = settings.volume;
+            switch (soundName) {
+                // Short UI tick
+                case 'click':
+                    playTone([{ freq: 1200, duration: 0.03, type: 'triangle' }], vol * 0.3);
+                    break;
 
-            const playPromise = audio.play();
+                // Upward two-note: message received
+                case 'notification':
+                    playTone([
+                        { freq: 880, duration: 0.10, delay: 0 },
+                        { freq: 1318, duration: 0.14, delay: 0.10 },
+                    ], vol * 0.5);
+                    break;
 
-            if (playPromise !== undefined) {
-                playPromise.catch(err => {
-                    console.error(`[SoundContext] Playback failed for ${soundName}:`, err);
-                    if (err.name === 'NotAllowedError') {
-                        console.warn('[SoundContext] Autoplay blocked. User must interact with the page first.');
-                    }
-                });
+                // Soft high pop: message sent
+                case 'message_sent':
+                    playTone([
+                        { freq: 1047, duration: 0.08, delay: 0 },
+                        { freq: 1568, duration: 0.07, delay: 0.07 },
+                    ], vol * 0.4);
+                    break;
+
+                // Rising arpeggio: voice room join
+                case 'join':
+                    playTone([
+                        { freq: 440, duration: 0.10, delay: 0.00 },
+                        { freq: 554, duration: 0.10, delay: 0.10 },
+                        { freq: 659, duration: 0.18, delay: 0.20 },
+                    ], vol * 0.5);
+                    break;
+
+                // Gentle descending tone: call start / connecting
+                case 'call_start':
+                    playTone([
+                        { freq: 660, duration: 0.20, delay: 0.00 },
+                        { freq: 440, duration: 0.30, delay: 0.18 },
+                    ], vol * 0.5);
+                    break;
+
+                default:
+                    break;
             }
         } catch (err) {
-            console.error(`[SoundContext] Error initializing audio for ${soundName}:`, err);
+            console.error('[SoundContext] Error playing sound:', err);
         }
-    }, [settings]);
+    }, [settings, playTone]);
 
     return (
         <SoundContext.Provider value={{ playSound, settings, updateSettings }}>
