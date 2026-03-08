@@ -667,22 +667,14 @@ div:hover>.message-delete-btn {
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         background: var(--bg-secondary);
         box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-    }
-
-    .rooms-container {
-        left: 0;
-        width: 280px;
-        transform: translateX(-100%);
-    }
-
-    .users-container {
-        right: 0;
-        width: 280px;
-        transform: translateX(100%);
+        display: none;
+        /* Hide by default on mobile */
     }
 
     .rooms-container.mobile-active,
     .users-container.mobile-active {
+        display: block;
+        /* Show only when active */
         transform: translateX(0);
     }
 

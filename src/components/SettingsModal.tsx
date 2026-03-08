@@ -175,21 +175,21 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                             {userData?.displayName?.charAt(0) || currentUser?.email?.charAt(0)}
                                         </div>
                                     )}
-                                    <div className="avatar-overlay">
+                                    <div className="avatar-overlay" style={{ pointerEvents: 'none' }}>
                                         <FaCamera />
                                         <span>{t('change_avatar')}</span>
                                     </div>
                                     {uploading && <div className="upload-spinner" />}
+                                    <input
+                                        id="avatar-upload"
+                                        type="file"
+                                        ref={fileInputRef}
+                                        style={{ display: 'none' }}
+                                        accept="image/*"
+                                        disabled={uploading}
+                                        onChange={onFileChange}
+                                    />
                                 </label>
-                                <input
-                                    id="avatar-upload"
-                                    type="file"
-                                    ref={fileInputRef}
-                                    style={{ display: 'none' }}
-                                    accept="image/*"
-                                    disabled={uploading}
-                                    onChange={onFileChange}
-                                />
                                 <div className="account-info-header">
                                     <span className="account-username">{userData?.displayName || 'Kullanıcı'}</span>
                                     <span className="account-tag">#0001</span>

@@ -476,7 +476,7 @@ export default function Dashboard() {
                 />
             )}
 
-            <div className={`users-container ${mobileSidebar === 'users' ? 'mobile-active' : ''}`} style={{ zIndex: 99, position: 'relative' }}>
+            <div className={`users-container ${mobileSidebar === 'users' ? 'mobile-active' : ''}`}>
                 <UserPanel onGroupSelect={(id) => { setActiveGroup(id); setActiveRoom(null); setMobileSidebar('none'); }} />
             </div>
         </div>

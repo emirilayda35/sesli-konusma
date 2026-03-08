@@ -286,6 +286,7 @@
     font-weight: 700;
     opacity: 0;
     transition: opacity 0.2s;
+    pointer-events: none;
 }
 
 .account-avatar-wrapper:hover .avatar-overlay {
