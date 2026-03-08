@@ -320,8 +320,7 @@ export const RoomSidebar = ({
 
     return (
         <aside className="room-sidebar">
-            <header className="sidebar-header">
-                Sesli Sohbet Uygulaması
+            <header className="sidebar-header" style={{ minHeight: 0, padding: 0 }}>
             </header>
             <div className="sidebar-scrollable">
                 <div className="category-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

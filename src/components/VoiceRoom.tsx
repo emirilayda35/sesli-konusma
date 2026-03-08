@@ -792,7 +792,7 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                                 <div className="voice-grid" style={{
                                     flex: 1, display: 'grid',
                                     gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))',
-                                    gap: 16, padding: 20,
+                                    gap: 16, padding: '80px 20px 120px 20px',
                                     justifyContent: 'center', alignContent: 'start', overflowY: 'auto'
                                 }}>
                                     <div id="local-video-card" className={`speaker-card ${isSpeaking ? 'speaking' : ''}`} style={{ background: 'var(--bg-secondary)', borderRadius: 12, position: 'relative', overflow: 'hidden', width: '100%', minHeight: 180, aspectRatio: '16/9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: `2px solid ${isSpeaking ? 'var(--brand)' : 'transparent'}` }}>
