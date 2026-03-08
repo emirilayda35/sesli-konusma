@@ -163,10 +163,10 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                         </div>
                         <div className="settings-section">
                             <div className="account-profile-card">
-                                <div
+                                <label
+                                    htmlFor="avatar-upload"
                                     className="account-avatar-wrapper"
-                                    onClick={() => !uploading && fileInputRef.current?.click()}
-                                    style={{ cursor: uploading ? 'wait' : 'pointer' }}
+                                    style={{ cursor: uploading ? 'wait' : 'pointer', display: 'block' }}
                                 >
                                     {userData?.photoURL ? (
                                         <img src={userData.photoURL} alt="Avatar" className="large-avatar" />
@@ -180,12 +180,14 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                                         <span>{t('change_avatar')}</span>
                                     </div>
                                     {uploading && <div className="upload-spinner" />}
-                                </div>
+                                </label>
                                 <input
+                                    id="avatar-upload"
                                     type="file"
                                     ref={fileInputRef}
                                     style={{ display: 'none' }}
                                     accept="image/*"
+                                    disabled={uploading}
                                     onChange={onFileChange}
                                 />
                                 <div className="account-info-header">

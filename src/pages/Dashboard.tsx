@@ -465,7 +465,18 @@ export default function Dashboard() {
                 </div>
             </main>
 
-            <div className={`users-container ${mobileSidebar === 'users' ? 'mobile-active' : ''}`}>
+            {/* Mobile backdrop: tap anywhere outside friends panel to close it */}
+            {mobileSidebar === 'users' && (
+                <div
+                    onClick={() => setMobileSidebar('none')}
+                    style={{
+                        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                        zIndex: 98, background: 'rgba(0,0,0,0.4)'
+                    }}
+                />
+            )}
+
+            <div className={`users-container ${mobileSidebar === 'users' ? 'mobile-active' : ''}`} style={{ zIndex: 99, position: 'relative' }}>
                 <UserPanel onGroupSelect={(id) => { setActiveGroup(id); setActiveRoom(null); setMobileSidebar('none'); }} />
             </div>
         </div>
