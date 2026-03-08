@@ -441,14 +441,8 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
     const [isExtraSettingsOpen, setIsExtraSettingsOpen] = useState(false);
 
 
-    // Initialize callDuration from stored start time so it persists across refreshes
-    const [callDuration, setCallDuration] = useState(() => {
-        const storedStart = localStorage.getItem(`callStart_${roomId}`);
-        if (storedStart) {
-            return Math.floor((Date.now() - parseInt(storedStart)) / 1000);
-        }
-        return 0;
-    });
+    // Initialize callDuration to 0 for a fresh start every time the user joins
+    const [callDuration, setCallDuration] = useState(0);
     const [isCallActive, setIsCallActive] = useState(false);
 
     useEffect(() => {
@@ -462,39 +456,24 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
     }, [roomId, db]);
 
     useEffect(() => {
+        // Start the call session when the first peer joins (or if we are the only one broadcasting immediately)
         if (peers.size > 0 && !isCallActive) {
             setIsCallActive(true);
-            // Store start time only if not already stored (first peer joined)
-            if (!localStorage.getItem(`callStart_${roomId}`)) {
-                localStorage.setItem(`callStart_${roomId}`, Date.now().toString());
-            }
         }
-    }, [peers.size, isCallActive, roomId]);
-
-    useEffect(() => {
-        // If we already have a stored start time (restored from refresh), activate the timer immediately
-        const storedStart = localStorage.getItem(`callStart_${roomId}`);
-        if (storedStart && !isCallActive) {
-            setIsCallActive(true);
-        }
-    }, [roomId]);
+    }, [peers.size, isCallActive]);
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
         if (isCallActive) {
+            // Count up exactly 1 second at a time while the active session exists
             interval = setInterval(() => {
-                const storedStart = localStorage.getItem(`callStart_${roomId}`);
-                if (storedStart) {
-                    setCallDuration(Math.floor((Date.now() - parseInt(storedStart)) / 1000));
-                } else {
-                    setCallDuration(prev => prev + 1);
-                }
+                setCallDuration(prev => prev + 1);
             }, 1000);
         }
         return () => {
             if (interval) clearInterval(interval);
         };
-    }, [isCallActive, roomId]);
+    }, [isCallActive]);
 
     const [isInviteMenuOpen, setIsInviteMenuOpen] = useState(false);
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
