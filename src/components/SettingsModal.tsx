@@ -431,9 +431,24 @@ export default function SettingsModal({ isOpen, onClose, initialTab = 'voice' }:
                 <div className="settings-sidebar">
                     <div className="settings-nav">
                         <h3>{t('user_settings')}</h3>
-                        <div className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('account'); }}>{t('my_account')}</div>
-                        <div className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('voice'); }}>{t('voice_video')}</div>
-                        <div className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => { playSound('click'); setActiveTab('appearance'); }}>{t('appearance')}</div>
+                        <button
+                            type="button"
+                            className={`settings-nav-item ${activeTab === 'account' ? 'active' : ''}`}
+                            onClick={() => { playSound('click'); setActiveTab('account'); }}
+                            style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', font: 'inherit', cursor: 'pointer' }}
+                        >{t('my_account')}</button>
+                        <button
+                            type="button"
+                            className={`settings-nav-item ${activeTab === 'voice' ? 'active' : ''}`}
+                            onClick={() => { playSound('click'); setActiveTab('voice'); }}
+                            style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', font: 'inherit', cursor: 'pointer' }}
+                        >{t('voice_video')}</button>
+                        <button
+                            type="button"
+                            className={`settings-nav-item ${activeTab === 'appearance' ? 'active' : ''}`}
+                            onClick={() => { playSound('click'); setActiveTab('appearance'); }}
+                            style={{ background: 'none', border: 'none', textAlign: 'left', width: '100%', font: 'inherit', cursor: 'pointer' }}
+                        >{t('appearance')}</button>
                     </div>
                 </div>
 
