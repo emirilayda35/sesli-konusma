@@ -976,6 +976,11 @@ export default function VoiceRoom({ roomId, onBack }: VoiceRoomProps) {
                             </button>
                         )}
 
+                        <button className="control-btn reconnect" onClick={reconnect} title={t('reconnect')}
+                            style={{ background: 'rgba(255,255,255,0.1)', color: 'white', width: '48px', height: '48px', borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
+                            <FaSync />
+                        </button>
+
                         <button className="control-btn settings" onClick={() => setIsExtraSettingsOpen(!isExtraSettingsOpen)} title={t('advanced')}
                             style={{ background: 'rgba(255,255,255,0.1)', color: 'white', width: '48px', height: '48px', borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
                             <FaCog />
